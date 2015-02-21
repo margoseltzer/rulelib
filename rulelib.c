@@ -12,9 +12,9 @@
 #include "rule.h"
 
 /* Function declarations. */
-unsigned long *ascii_to_vector(char *, size_t, int *, int *);
+v_entry *ascii_to_vector(char *, size_t, int *, int *);
 #define RULE_INC 100
-#define BITS_PER_ENTRY (sizeof(unsigned long) * 8)
+#define BITS_PER_ENTRY (sizeof(v_entry) * 8)
 
 /*
  * Preprocessing step.
@@ -90,7 +90,7 @@ err:
  * This is a hand-coded naive implementation; we'll also support
  * the GMP library, switching between the two with a compiler directive.
  */
-unsigned long *
+v_entry *
 ascii_to_vector(char *line, size_t len, int *nsamples, int *nones)
 {
 	/*
@@ -101,8 +101,8 @@ ascii_to_vector(char *line, size_t len, int *nsamples, int *nones)
 
 	char *p;
 	int i, bufsize, last_i, ones;
-	unsigned long val;
-	unsigned long *bufp, *buf;
+	v_entry val;
+	v_entry *bufp, *buf;
 
 	/* NOT DONE */
 	assert(line != NULL);
@@ -112,7 +112,7 @@ ascii_to_vector(char *line, size_t len, int *nsamples, int *nones)
 		bufsize = (len + BITS_PER_ENTRY - 1) / BITS_PER_ENTRY;
 	else
 		bufsize = (*nsamples + BITS_PER_ENTRY - 1) / BITS_PER_ENTRY;
-	buf = malloc(bufsize * sizeof(unsigned long));
+	buf = malloc(bufsize * sizeof(v_entry));
 	if (buf == NULL)
 		return(NULL);
 	
@@ -162,3 +162,59 @@ ascii_to_vector(char *line, size_t len, int *nsamples, int *nones)
 	*nones = ones;
 	return (buf);
 }
+
+int
+ruleset_init(int nrules,
+    int nsamples, int *idarray, rule_t *rules, ruleset_t **retruleset)
+{
+	int i;
+	rule_t *cur_rule;
+	ruleset_t *rs;
+
+	/*
+	 * Allocate space for the ruleset structure and the ruleset entries.
+	 */
+	rs = malloc(sizeof(ruleset_t) + nrules * sizeof(ruleset_entry_t));
+	if (rs == NULL)
+		return (errno);
+
+	/*
+	 * Allocate the ruleset at the front of the structure and then
+	 * the ruleset_entry_t array at the end.
+	 */
+	rs->n_rules = nrules;
+	rs->rules = (ruleset_entry_t *)(rs + 1);
+
+	for (i = 0; i < nrules; i++) {
+		rs->rules[i].rule_id = idarray[i];
+		rs->n_samples = nsamples;
+		cur_rule = rules + idarray[i];
+		if (i == 0) {
+			rs->rules[i].captures = 
+			    rule_tt_copy(cur_rule, nsamples);
+			rs->rules[i].ncaptured = cur_rule->support;
+			/* ERROR CHECK */
+		}
+		else {
+			rs->rules[i].captures = rule_tt_andnot(cur_rule,
+			    rs->rules[i-1].captures, nsamples,
+			    &rs->rules[i].ncaptured);
+			/* ERROR CHECK */
+		}
+	}
+	*retruleset = rs;
+	return (0);
+}
+
+v_entry *
+rule_tt_copy(rule_t *rule, int len)
+{
+	return (NULL);
+}
+
+v_entry *
+rule_tt_andnot(rule_t *rule, v_entry *captures, int nsamples, int *ret_support)
+{
+	return (NULL);
+}
+

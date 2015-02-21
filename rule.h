@@ -29,6 +29,11 @@
  */
 
 /*
+ * Define types for bit vectors.
+ */
+typedef unsigned long v_entry;
+
+/*
  * We have slightly different structures to represent the original rules 
  * and rulesets. The original structure contains the ascii representation
  * of the rule; the ruleset structure refers to rules by ID and contains
@@ -37,17 +42,18 @@
 typedef struct rule {
 	char *features;			/* Representation of the rule. */
 	int support;			/* Number of 1's in truth table. */
-	unsigned long *truthtable;	/* Truth table; one bit per sample. */
+	v_entry *truthtable;		/* Truth table; one bit per sample. */
 } rule_t;
 
 typedef struct ruleset_entry {
 	unsigned rule_id;
 	int ncaptured;			/* Number of 1's in bit vector. */
-	unsigned long *captures;	/* Bit vector. */
+	v_entry	 *captures;		/* Bit vector. */
 } ruleset_entry_t;
 
 typedef struct ruleset {
 	int n_rules;
+	int n_samples;
 	ruleset_entry_t *rules;	/* Array of rules. */
 } ruleset_t;
 
@@ -55,3 +61,6 @@ typedef struct ruleset {
  * Functions in the library
  */
 int rules_init(const char *, int *, int *, rule_t **);
+int ruleset_init(int, int, int *, rule_t *, ruleset_t **);
+v_entry *rule_tt_copy(rule_t *, int);
+v_entry *rule_tt_andnot(rule_t *, v_entry *, int, int *);
