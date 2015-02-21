@@ -36,11 +36,13 @@
  */
 typedef struct rule {
 	char *features;			/* Representation of the rule. */
+	int support;			/* Number of 1's in truth table. */
 	unsigned long *truthtable;	/* Truth table; one bit per sample. */
 } rule_t;
 
 typedef struct ruleset_entry {
 	unsigned rule_id;
+	int ncaptured;			/* Number of 1's in bit vector. */
 	unsigned long *captures;	/* Bit vector. */
 } ruleset_entry_t;
 

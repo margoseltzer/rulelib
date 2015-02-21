@@ -12,7 +12,7 @@
 #include "rule.h"
 
 /* Function declarations. */
-unsigned long *ascii_to_vector(char *, size_t, int *);
+unsigned long *ascii_to_vector(char *, size_t, int *, int *);
 #define RULE_INC 100
 #define BITS_PER_ENTRY (sizeof(unsigned long) * 8)
 
@@ -30,7 +30,7 @@ rules_init(const char *infile, int *nrules, int *nsamples, rule_t **rules_ret)
 	FILE *fi;
 	char *line, *rulestr;
 	int rule_cnt, sample_cnt, rsize;
-	int i, ret;
+	int i, ones, ret;
 	rule_t *rules;
 	size_t len, rulelen;
 
@@ -55,10 +55,10 @@ rules_init(const char *infile, int *nrules, int *nsamples, rule_t **rules_ret)
 			goto err;
 		(void)strncpy(rules[rule_cnt].features, rulestr, rulelen);
 		rules[rule_cnt].truthtable = 
-		    ascii_to_vector(line, len, &sample_cnt);
+		    ascii_to_vector(line, len, &sample_cnt, &ones);
 		if (rules[rule_cnt].truthtable == NULL)
 			goto err;
-
+		rules[rule_cnt].support = ones;
 		rule_cnt++;
 	}
 	/* All done! */
@@ -91,7 +91,7 @@ err:
  * the GMP library, switching between the two with a compiler directive.
  */
 unsigned long *
-ascii_to_vector(char *line, size_t len, int *nsamples)
+ascii_to_vector(char *line, size_t len, int *nsamples, int *nones)
 {
 	/*
 	 * If *nsamples is 0, then we will set it to the number of
@@ -100,7 +100,7 @@ ascii_to_vector(char *line, size_t len, int *nsamples)
 	 */
 
 	char *p;
-	int i, bufsize, last_i;
+	int i, bufsize, last_i, ones;
 	unsigned long val;
 	unsigned long *bufp, *buf;
 
@@ -120,6 +120,7 @@ ascii_to_vector(char *line, size_t len, int *nsamples)
 	val = 0;
 	i = 0;
 	last_i = 0;
+	ones = 0;
 
 
 	for(p = line; len-- > 0; p++) {
@@ -132,6 +133,7 @@ ascii_to_vector(char *line, size_t len, int *nsamples)
 				val <<= 1;
 				val++;
 				i++;
+				ones++;
 				break;
 			default:
 				break;
@@ -157,5 +159,6 @@ ascii_to_vector(char *line, size_t len, int *nsamples)
 		/* free(buf); */
 		buf = NULL;
 	}
+	*nones = ones;
 	return (buf);
 }
