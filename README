@@ -6,3 +6,27 @@ makedata.py: Transform data sets into something I can easily read into a C progr
 
 analyze.c:	Routines to read in the data from makedata, create random rulesets,
 		and perform additions, removals, and swaps on said rulesets.
+
+Logic of capture management:
+
+1. Remove ith rule from a ruleset
+
+foreach j > i
+	let caught = j.tt & i.captures
+	j.captures = j.captures | caught
+	i.captures & ~caught
+
+2. Add a rule (n) into the ith slot of a ruleset (sliding those in slots > i
+down one).
+
+caught = forall j < i j.captures
+n.captures = n.tt & ~caught
+foreach j > i
+	j.captures = j.captures & ~n.captures
+
+
+3. Swap see code
+
+TODO: I don't think I need two sets of vector operations -- (right now
+I have pure vector and then some with rule and vector)  Pure vector will
+also be better for converting to GMP

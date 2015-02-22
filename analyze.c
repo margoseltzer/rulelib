@@ -18,8 +18,11 @@
 
 /* Convenient macros. */
 #define RANDOM_RANGE(lo, hi) \
-	(unsigned)(lo + long((random() / (float)RAND_MAX) * (hi - lo + 1)))
+    (unsigned)(lo + (unsigned)((random() / (float)RAND_MAX) * (hi - lo + 1)))
 #define DEFAULT_RULESET_SIZE  3
+
+void run_experiment(int, int, int, int, rule_t *);
+int debug;
 
 /*
  * Usage: analyze <file> -s <ruleset-size> -i <input operations> -S <seed>
@@ -27,7 +30,7 @@
 int
 usage(void)
 {
-	(void)fprintf(stderr, "Usage: analyze [-s ruleset-size] %s\n",
+	(void)fprintf(stderr, "Usage: analyze [-d] [-s ruleset-size] %s\n",
 	    "[-i cmdfile] [-S seed]");
 	return (-1);
 }
@@ -42,8 +45,12 @@ main (int argc, char *argv[])
 	char ch, *cmdfile = NULL, *infile;
 	rule_t *rules;
 
-	while ((ch = getopt(argc, argv, "i:s:S:")) != EOF)
+	debug = 0;
+	while ((ch = getopt(argc, argv, "di:s:S:")) != EOF)
 		switch (ch) {
+		case 'd':
+			debug = 1;
+			break;
 		case 'i':
 			cmdfile = optarg;
 			break;
@@ -70,5 +77,70 @@ main (int argc, char *argv[])
 		return (ret);
 
 	printf("%d rules %d samples\n", nrules, nsamples);
+	if (debug)
+		rule_print_all(rules, nrules, nsamples);
+
+	/*
+	 * Add number of iterations for first parameter
+	 */
+	run_experiment(1, size, nsamples, nrules, rules);
 }
 
+int
+create_random_ruleset(int size,
+    int nsamples, int nrules, rule_t *rules, ruleset_t **rs)
+{
+	int i, j, *ids, next, ret;
+
+	ids = calloc(size, sizeof(int));
+	for (i = 0; i < size; i++) {
+try_again:	next = RANDOM_RANGE(0, nrules);
+		/* Check for duplicates. */
+		for (j = 0; j < i; j++)
+			if (ids[j] == next)
+				goto try_again;
+		ids[i] = next;
+	}
+
+	return(ruleset_init(size, nsamples, ids, rules, rs));
+}
+
+/*
+ * Generate a random ruleset and then do some number of adds, removes,
+ * swaps, etc.
+ */
+void
+run_experiment(int iters, int size, int nsamples, int nrules, rule_t *rules)
+{
+	int i, j, k, ret;
+	ruleset_t *rs;
+
+	for (i = 0; i < iters; i++) {
+		ret = create_random_ruleset(size, nsamples, nrules, rules, &rs);
+		if (ret != 0)
+			return;
+		if (debug) {
+			printf("Initial ruleset\n");
+			ruleset_print(rs, rules);
+		}
+
+		/* Now perform-size squared swaps */
+		for (j = 0; j < size; j++)
+			for (k = 1; k < size; k++) {
+				if (debug)
+					printf("Swapping rules %d and %d\n",
+					    rs->rules[k-1].rule_id,
+					    rs->rules[k].rule_id);
+				if (rule_swap(rs, k - 1, k, rules))
+					return;
+				if (debug)
+					ruleset_print(rs, rules);
+			}
+
+		/*
+		 * Now remove a rule from each position, replacing it
+		 * with a random rule at the end.
+		 */
+	}
+
+}

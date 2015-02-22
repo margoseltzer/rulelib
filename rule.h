@@ -62,5 +62,16 @@ typedef struct ruleset {
  */
 int rules_init(const char *, int *, int *, rule_t **);
 int ruleset_init(int, int, int *, rule_t *, ruleset_t **);
+int rule_swap(ruleset_t *, int, int, rule_t *);
+void ruleset_print(ruleset_t *, rule_t *);
+void rule_print(rule_t *, int, int);
+void rule_print_all(rule_t *, int, int);
+void ruleset_entry_print(ruleset_entry_t *, int);
+void rule_vector_print(v_entry *, int);
 v_entry *rule_tt_copy(rule_t *, int);
-v_entry *rule_tt_andnot(rule_t *, v_entry *, int, int *);
+v_entry *rule_tt_andnot(rule_t *, v_entry *, int, v_entry *, int *);
+v_entry *rule_tt_and(rule_t *, v_entry *, int, v_entry *, int *);
+v_entry *rule_tt_or(rule_t *, v_entry *, int, v_entry *, int *);
+v_entry *rule_vandnot(v_entry *, v_entry *, int, int *);
+v_entry *rule_vor(v_entry *, v_entry *, int);
+int count_ones(v_entry);
