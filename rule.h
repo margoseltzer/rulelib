@@ -52,7 +52,8 @@ typedef struct ruleset_entry {
 } ruleset_entry_t;
 
 typedef struct ruleset {
-	int n_rules;
+	int n_rules;			/* Number of actual rules. */
+	int n_alloc;			/* Spaces allocated for rules. */
 	int n_samples;
 	ruleset_entry_t *rules;	/* Array of rules. */
 } ruleset_t;
@@ -60,8 +61,9 @@ typedef struct ruleset {
 /*
  * Functions in the library
  */
-int rules_init(const char *, int *, int *, rule_t **);
 int ruleset_init(int, int, int *, rule_t *, ruleset_t **);
+void ruleset_delete(rule_t *, int, ruleset_t *, int);
+int rules_init(const char *, int *, int *, rule_t **);
 int rule_swap(ruleset_t *, int, int, rule_t *);
 void ruleset_print(ruleset_t *, rule_t *);
 void rule_print(rule_t *, int, int);

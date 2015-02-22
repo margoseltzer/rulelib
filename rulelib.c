@@ -207,6 +207,7 @@ ruleset_init(int nrules,
 	 * the ruleset_entry_t array at the end.
 	 */
 	rs->n_rules = nrules;
+	rs->n_alloc = nrules;
 	rs->n_samples = nsamples;
 	rs->rules = (ruleset_entry_t *)(rs + 1);
 
@@ -238,6 +239,43 @@ ruleset_init(int nrules,
 	if (all_captured != NULL)
 		free(all_captured);
 	return (0);
+}
+
+void
+ruleset_delete(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
+{
+	int i, nset;
+	v_entry *curvec, *oldv;
+
+	/* Compute new captures for all rules following the one at ndx.  */
+	oldv = rs->rules[ndx].captures;
+	for (i = ndx + 1; i < rs->n_rules; i++) {
+		/*
+		 * Anything that was captured by ndx and could be captured
+		 * by i gets added to captures of i.
+		 */
+		curvec = rs->rules[i].captures;
+		rs->rules[i].captures = rule_tt_and(rules + rs->rules[i].rule_id,
+		    oldv, rs->n_samples, curvec, &nset);
+		rs->rules[i].ncaptured = nset;
+
+		/*
+		 * Now remove the ones from oldv that just got set for rule
+		 * i because they should not be captured later.
+		 */
+		oldv = rule_vandnot(oldv, curvec, rs->n_samples, &nset);
+	}
+
+	/* Now remove alloc'd data for rule at ndx. */
+	(void)free(oldv);
+
+	/* Shift up cells if necessary. */
+	if (ndx != rs->n_rules - 1)
+		memcpy(rs->rules + ndx, rs->rules + ndx + 1,
+		    sizeof(ruleset_entry_t) * (rs->n_rules - ndx));
+
+	rs->n_rules--;
+	return;
 }
 
 v_entry *

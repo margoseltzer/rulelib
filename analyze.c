@@ -105,6 +105,12 @@ try_again:	next = RANDOM_RANGE(0, nrules);
 	return(ruleset_init(size, nsamples, ids, rules, rs));
 }
 
+void
+add_random_rule(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
+{
+	return;
+}
+
 /*
  * Generate a random ruleset and then do some number of adds, removes,
  * swaps, etc.
@@ -141,6 +147,14 @@ run_experiment(int iters, int size, int nsamples, int nrules, rule_t *rules)
 		 * Now remove a rule from each position, replacing it
 		 * with a random rule at the end.
 		 */
+		for (j = 0; j < size; j++) {
+			if (debug)
+				printf("Deleting rule %d\n", j);
+			ruleset_delete(rules, nrules, rs, j);
+			if (debug)
+				ruleset_print(rs, rules);
+			add_random_rule(rules, nrules, rs, j);
+		}
 	}
 
 }
