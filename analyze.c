@@ -105,10 +105,23 @@ try_again:	next = RANDOM_RANGE(0, nrules);
 	return(ruleset_init(size, nsamples, ids, rules, rs));
 }
 
-void
+/*
+ * Given a rule set, pick a random rule (not already in the set) and
+ * add it at the ndx-th position.
+ */
+int
 add_random_rule(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
 {
-	return;
+	int j, new_rule;
+
+pickrule:
+	new_rule = RANDOM_RANGE(0, nrules);
+	for (j = 0; j < rs->n_rules; j++)
+		if (rs->rules[j].rule_id == new_rule)
+			goto pickrule;
+	if (debug)
+		printf("\nAdding rule: %d\n", new_rule);
+	return(ruleset_add(rules, nrules, rs, new_rule, ndx));
 }
 
 /*
@@ -134,7 +147,7 @@ run_experiment(int iters, int size, int nsamples, int nrules, rule_t *rules)
 		for (j = 0; j < size; j++)
 			for (k = 1; k < size; k++) {
 				if (debug)
-					printf("Swapping rules %d and %d\n",
+					printf("\nSwapping rules %d and %d\n",
 					    rs->rules[k-1].rule_id,
 					    rs->rules[k].rule_id);
 				if (rule_swap(rs, k - 1, k, rules))
@@ -149,11 +162,13 @@ run_experiment(int iters, int size, int nsamples, int nrules, rule_t *rules)
 		 */
 		for (j = 0; j < size; j++) {
 			if (debug)
-				printf("Deleting rule %d\n", j);
+				printf("\nDeleting rule %d\n", j);
 			ruleset_delete(rules, nrules, rs, j);
-			if (debug)
+			if (debug) 
 				ruleset_print(rs, rules);
 			add_random_rule(rules, nrules, rs, j);
+			if (debug)
+				ruleset_print(rs, rules);
 		}
 	}
 

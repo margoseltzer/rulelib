@@ -241,23 +241,92 @@ ruleset_init(int nrules,
 	return (0);
 }
 
+/*
+ * Add the specified rule to the ruleset at position ndx (shifting
+ * all rules after ndx down by one).
+ */
+int
+ruleset_add(rule_t *rules, int nrules, ruleset_t *rs, int newrule, int ndx)
+{
+	int i;
+	rule_t *expand;
+	v_entry *captured;
+
+	/* Check for space. */
+	if (rs->n_alloc < rs->n_rules + 1) {
+		expand = realloc(rs->rules, 
+		    (rs->n_rules + 1) * sizeof(ruleset_entry_t));
+		if (expand == NULL)
+			return (errno);			
+		rs->n_alloc = rs->n_rules + 1;
+	}
+
+	/* Shift later rules down by 1. */
+	if (ndx != rs->n_rules)
+		memmove(rs->rules + (ndx + 1), rs->rules + ndx,
+		    sizeof(ruleset_entry_t) * rs->n_rules - ndx);
+
+	/*
+	 * Insert new rule.
+	 * 1. Compute what is already captured by earlier rules.
+	 * 2. Add rule into ruleset.
+	 * 3. Compute new captures for all rules following the new one.
+	 */
+	if (ndx == 0)
+		captured = rule_tt_copy(rules + newrule, rs->n_samples);
+		if (captured == NULL)
+			return (errno);
+	else  {
+		captured =
+		    rule_tt_copy(rules + rs->rules[0].rule_id, rs->n_samples);
+		if (captured == NULL)
+			return (errno);
+
+		for (i = 1; i < ndx; i++)
+			captured = rule_vor(captured,
+			    rs->rules[i].captures, rs->n_samples);
+		captured = rule_tt_andnot(rules + newrule, captured,
+			rs->n_samples, captured, &rs->rules[ndx].ncaptured);
+
+	}
+	rs->rules[ndx].rule_id = newrule;
+	rs->rules[ndx].captures = captured;
+	rs->n_rules++;
+
+	for (i = ndx + 1; i < rs->n_rules; i++)
+		rs->rules[i].captures = rule_vandnot(rs->rules[i].captures,
+		    rs->rules[i-1].captures, rs->n_samples,
+		    &rs->rules[i].ncaptured);
+		
+	return(0);
+}
+
+/*
+ * Delete the rule in the ndx-th position in the given ruleset.
+ */
 void
 ruleset_delete(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
 {
 	int i, nset;
-	v_entry *curvec, *oldv;
+	v_entry *curvec, *oldv, *tmp_vec;
 
 	/* Compute new captures for all rules following the one at ndx.  */
 	oldv = rs->rules[ndx].captures;
 	for (i = ndx + 1; i < rs->n_rules; i++) {
 		/*
-		 * Anything that was captured by ndx and could be captured
-		 * by i gets added to captures of i.
+		 * My new captures is my old captures or'd with anything that
+		 * was captured by ndx and is captured by my rule.
 		 */
 		curvec = rs->rules[i].captures;
-		rs->rules[i].captures = rule_tt_and(rules + rs->rules[i].rule_id,
-		    oldv, rs->n_samples, curvec, &nset);
-		rs->rules[i].ncaptured = nset;
+		rs->rules[i].captures =
+		    tmp_vec = rule_tt_and(rules + rs->rules[i].rule_id,
+		        oldv, rs->n_samples, NULL, &nset);
+		if (tmp_vec == NULL)
+			return;
+		rs->rules[i].ncaptured += nset;
+		rs->rules[i].captures =
+		    rule_vor(curvec, tmp_vec, rs->n_samples);
+		free(tmp_vec);
 
 		/*
 		 * Now remove the ones from oldv that just got set for rule
@@ -271,7 +340,7 @@ ruleset_delete(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
 
 	/* Shift up cells if necessary. */
 	if (ndx != rs->n_rules - 1)
-		memcpy(rs->rules + ndx, rs->rules + ndx + 1,
+		memmove(rs->rules + ndx, rs->rules + ndx + 1,
 		    sizeof(ruleset_entry_t) * (rs->n_rules - ndx));
 
 	rs->n_rules--;

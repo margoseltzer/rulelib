@@ -62,6 +62,7 @@ typedef struct ruleset {
  * Functions in the library
  */
 int ruleset_init(int, int, int *, rule_t *, ruleset_t **);
+int ruleset_add(rule_t *, int, ruleset_t *, int, int);
 void ruleset_delete(rule_t *, int, ruleset_t *, int);
 int rules_init(const char *, int *, int *, rule_t **);
 int rule_swap(ruleset_t *, int, int, rule_t *);
