@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "mytime.h"
 #include "rule.h"
 
 /* Convenient macros. */
@@ -44,6 +45,7 @@ main (int argc, char *argv[])
 	int nrules, nsamples;
 	char ch, *cmdfile = NULL, *infile;
 	rule_t *rules;
+	struct timeval tv_acc, tv_start, tv_end;
 
 	debug = 0;
 	while ((ch = getopt(argc, argv, "di:s:S:")) != EOF)
@@ -73,8 +75,12 @@ main (int argc, char *argv[])
 
 	infile = argv[0];
 
+	INIT_TIME(tv_acc);
+	START_TIME(tv_start);
 	if ((ret = rules_init(infile, &nrules, &nsamples, &rules)) != 0)
 		return (ret);
+	END_TIME(tv_start, tv_end, tv_acc);
+	REPORT_TIME("analyze", "per rule", tv_acc, nrules);
 
 	printf("%d rules %d samples\n", nrules, nsamples);
 	if (debug)
@@ -83,7 +89,11 @@ main (int argc, char *argv[])
 	/*
 	 * Add number of iterations for first parameter
 	 */
-	run_experiment(1, size, nsamples, nrules, rules);
+	INIT_TIME(tv_acc);
+	START_TIME(tv_start);
+	run_experiment(10, size, nsamples, nrules, rules);
+	END_TIME(tv_start, tv_end, tv_acc);
+	REPORT_TIME("analyze", "per swap", tv_acc, (10 * size * size));
 }
 
 int
@@ -94,7 +104,7 @@ create_random_ruleset(int size,
 
 	ids = calloc(size, sizeof(int));
 	for (i = 0; i < size; i++) {
-try_again:	next = RANDOM_RANGE(0, nrules);
+try_again:	next = RANDOM_RANGE(0, (nrules - 1));
 		/* Check for duplicates. */
 		for (j = 0; j < i; j++)
 			if (ids[j] == next)

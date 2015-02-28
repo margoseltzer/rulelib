@@ -1,5 +1,5 @@
 # this is PyFIM, available from http://www.borgelt.net/pyfim.html
-from fp_growth import find_frequent_itemsets
+from fim import fpgrowth
 from numpy import loadtxt
 
 # Routines taken from BRL_code.py (Reformatted for me.)
@@ -40,8 +40,11 @@ def get_freqitemsets(fname, minsupport=10, maxlhs = 2):
 
 	assert len(data_pos)+len(data_neg) == len(data)
 
-	itemsets = list(find_frequent_itemsets(data_pos, minsupport))
-	itemsets = itemsets + list(find_frequent_itemsets(data_neg, minsupport))
+	print "About to calculate positive itemsets"
+  	itemsets = [r[0] for r in fpgrowth(data_pos,supp=minsupport,zmax=maxlhs)]
+	print "About to calculate negative itemsets"
+  	itemsets.extend([r[0] for r in fpgrowth(data_neg,supp=minsupport,zmax=maxlhs)])
+	print "Done"
 
 	n_rules = len(itemsets)
 
@@ -50,6 +53,7 @@ def get_freqitemsets(fname, minsupport=10, maxlhs = 2):
 	# indicating if the sample satisfies the rule or not.
 
 	for lhs in itemsets :
+		print lhs
 		fout.write(''.join(lhs) + '\t')
     		for (j, attrs) in enumerate(data) :
 			if set(lhs).issubset(attrs) :
