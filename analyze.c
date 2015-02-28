@@ -89,11 +89,7 @@ main (int argc, char *argv[])
 	/*
 	 * Add number of iterations for first parameter
 	 */
-	INIT_TIME(tv_acc);
-	START_TIME(tv_start);
 	run_experiment(10, size, nsamples, nrules, rules);
-	END_TIME(tv_start, tv_end, tv_acc);
-	REPORT_TIME("analyze", "per swap", tv_acc, (10 * size * size));
 }
 
 int
@@ -125,7 +121,7 @@ add_random_rule(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
 	int j, new_rule;
 
 pickrule:
-	new_rule = RANDOM_RANGE(0, nrules);
+	new_rule = RANDOM_RANGE(0, (nrules-1));
 	for (j = 0; j < rs->n_rules; j++)
 		if (rs->rules[j].rule_id == new_rule)
 			goto pickrule;
@@ -143,6 +139,7 @@ run_experiment(int iters, int size, int nsamples, int nrules, rule_t *rules)
 {
 	int i, j, k, ret;
 	ruleset_t *rs;
+	struct timeval tv_acc, tv_start, tv_end;
 
 	for (i = 0; i < iters; i++) {
 		ret = create_random_ruleset(size, nsamples, nrules, rules, &rs);
@@ -154,22 +151,28 @@ run_experiment(int iters, int size, int nsamples, int nrules, rule_t *rules)
 		}
 
 		/* Now perform-size squared swaps */
+		INIT_TIME(tv_acc);
+		START_TIME(tv_start);
 		for (j = 0; j < size; j++)
 			for (k = 1; k < size; k++) {
 				if (debug)
 					printf("\nSwapping rules %d and %d\n",
 					    rs->rules[k-1].rule_id,
 					    rs->rules[k].rule_id);
-				if (rule_swap(rs, k - 1, k, rules))
+				if (ruleset_swap(rs, k - 1, k, rules))
 					return;
 				if (debug)
 					ruleset_print(rs, rules);
 			}
+		END_TIME(tv_start, tv_end, tv_acc);
+		REPORT_TIME("analyze", "per swap", tv_acc, (size * size));
 
 		/*
 		 * Now remove a rule from each position, replacing it
 		 * with a random rule at the end.
 		 */
+		INIT_TIME(tv_acc);
+		START_TIME(tv_start);
 		for (j = 0; j < size; j++) {
 			if (debug)
 				printf("\nDeleting rule %d\n", j);
@@ -180,6 +183,8 @@ run_experiment(int iters, int size, int nsamples, int nrules, rule_t *rules)
 			if (debug)
 				ruleset_print(rs, rules);
 		}
+		END_TIME(tv_start, tv_end, tv_acc);
+		REPORT_TIME("analyze", "per add/del", tv_acc, (size * 2));
 	}
 
 }

@@ -107,6 +107,16 @@ err:
 	return (ret);
 }
 
+/* Malloc a vector to contain nsamples bits. */
+v_entry *
+rule_vinit(int len)
+{
+	int nentries;
+
+	nentries = (len + BITS_PER_ENTRY - 1)/BITS_PER_ENTRY;
+	return (calloc(nentries, sizeof(v_entry)));
+}
+
 /*
  * Convert an ascii sequence of 0's and 1's to a bit vector.
  * This is a hand-coded naive implementation; we'll also support
@@ -189,7 +199,7 @@ int
 ruleset_init(int nrules,
     int nsamples, int *idarray, rule_t *rules, ruleset_t **retruleset)
 {
-	int i;
+	int i, tmp;
 	rule_t *cur_rule;
 	ruleset_t *rs;
 	ruleset_entry_t *cur_re;
@@ -217,28 +227,40 @@ ruleset_init(int nrules,
 		cur_re->rule_id = idarray[i];
 
 		if (i == 0) {
-			cur_re->captures = rule_tt_copy(cur_rule, nsamples);
-			/* ERROR CHECK */
+			if ((cur_re->captures = rule_vinit(nsamples)) == NULL)
+				goto err1;
+			cur_re->captures =
+			    rule_copy(cur_rule->truthtable, nsamples);
 			cur_re->ncaptured = cur_rule->support;
-			all_captured = rule_tt_copy(cur_rule, nsamples);
-			/* ERROR CHECK */
-		}
-		else {
-			cur_re->captures = rule_tt_andnot(cur_rule,
-			    all_captured, nsamples, NULL, &cur_re->ncaptured);
-			/* ERROR CHECK */
+			all_captured =
+			    rule_copy(cur_rule->truthtable, nsamples);
+			if (all_captured == NULL)
+				goto err1;
+		} else {
+			if ((cur_re->captures = rule_vinit(nsamples)) == NULL)
+				goto err1;
+			rule_vandnot(cur_re->captures, cur_rule->truthtable,
+			    all_captured, nsamples, &cur_re->ncaptured);
 
-			/* MIS -- combine these two? */
 			/* Skip this on the last one. */
 			if (i != nrules - 1)
-				all_captured = rule_vor(all_captured,
-				    cur_re->captures, nsamples);
+				rule_vor(all_captured,
+				    all_captured, cur_re->captures, nsamples, &tmp);
 		}
 	}
 	*retruleset = rs;
 	if (all_captured != NULL)
 		free(all_captured);
 	return (0);
+
+err1:
+	if (all_captured != NULL)
+		free(all_captured);
+	for (int j = 0; j <= i; j++)
+		if (rs->rules[i].captures != NULL)
+			free (rs->rules[i].captures);
+
+	return (ENOMEM);
 }
 
 /*
@@ -248,7 +270,7 @@ ruleset_init(int nrules,
 int
 ruleset_add(rule_t *rules, int nrules, ruleset_t *rs, int newrule, int ndx)
 {
-	int i;
+	int i, tmp;
 	rule_t *expand;
 	v_entry *captured;
 
@@ -273,20 +295,20 @@ ruleset_add(rule_t *rules, int nrules, ruleset_t *rs, int newrule, int ndx)
 	 * 3. Compute new captures for all rules following the new one.
 	 */
 	if (ndx == 0)
-		captured = rule_tt_copy(rules + newrule, rs->n_samples);
+		captured = rule_copy(rules[newrule].truthtable, rs->n_samples);
 		if (captured == NULL)
 			return (errno);
 	else  {
-		captured =
-		    rule_tt_copy(rules + rs->rules[0].rule_id, rs->n_samples);
+		captured = rule_copy(rules[rs->rules[0].rule_id].truthtable,
+		        rs->n_samples);
 		if (captured == NULL)
 			return (errno);
 
 		for (i = 1; i < ndx; i++)
-			captured = rule_vor(captured,
-			    rs->rules[i].captures, rs->n_samples);
-		captured = rule_tt_andnot(rules + newrule, captured,
-			rs->n_samples, captured, &rs->rules[ndx].ncaptured);
+			rule_vor(captured, captured,
+			    rs->rules[i].captures, rs->n_samples, &tmp);
+		rule_vandnot(captured, rules[newrule].truthtable,
+		    captured, rs->n_samples, &rs->rules[ndx].ncaptured);
 
 	}
 	rs->rules[ndx].rule_id = newrule;
@@ -294,9 +316,9 @@ ruleset_add(rule_t *rules, int nrules, ruleset_t *rs, int newrule, int ndx)
 	rs->n_rules++;
 
 	for (i = ndx + 1; i < rs->n_rules; i++)
-		rs->rules[i].captures = rule_vandnot(rs->rules[i].captures,
-		    rs->rules[i-1].captures, rs->n_samples,
-		    &rs->rules[i].ncaptured);
+		rule_vandnot(rs->rules[i].captures,
+		    rules[rs->rules[i].rule_id].truthtable, rs->rules[i-1].captures,
+		    rs->n_samples, &rs->rules[i].ncaptured);
 		
 	return(0);
 }
@@ -312,30 +334,28 @@ ruleset_delete(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
 
 	/* Compute new captures for all rules following the one at ndx.  */
 	oldv = rs->rules[ndx].captures;
+	if ((tmp_vec = rule_vinit(rs->n_samples)) == NULL)
+		return;
 	for (i = ndx + 1; i < rs->n_rules; i++) {
 		/*
 		 * My new captures is my old captures or'd with anything that
 		 * was captured by ndx and is captured by my rule.
 		 */
 		curvec = rs->rules[i].captures;
-		rs->rules[i].captures =
-		    tmp_vec = rule_tt_and(rules + rs->rules[i].rule_id,
-		        oldv, rs->n_samples, NULL, &nset);
-		if (tmp_vec == NULL)
-			return;
+		rule_vand(tmp_vec, rules[rs->rules[i].rule_id].truthtable,
+		    oldv, rs->n_samples, &nset);
 		rs->rules[i].ncaptured += nset;
-		rs->rules[i].captures =
-		    rule_vor(curvec, tmp_vec, rs->n_samples);
-		free(tmp_vec);
+		rule_vor(curvec, curvec, tmp_vec, rs->n_samples, &nset);
 
 		/*
 		 * Now remove the ones from oldv that just got set for rule
 		 * i because they should not be captured later.
 		 */
-		oldv = rule_vandnot(oldv, curvec, rs->n_samples, &nset);
+		rule_vandnot(oldv, oldv, curvec, rs->n_samples, &nset);
 	}
 
 	/* Now remove alloc'd data for rule at ndx. */
+	(void)free(tmp_vec);
 	(void)free(oldv);
 
 	/* Shift up cells if necessary. */
@@ -348,90 +368,18 @@ ruleset_delete(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
 }
 
 v_entry *
-rule_tt_copy(rule_t *rule, int len)
+rule_copy(v_entry *vector, int len)
 {
 	v_entry *newv, *tt;
 	int i, nentries;
 
 	nentries = (len + BITS_PER_ENTRY - 1)/BITS_PER_ENTRY;
-	newv = calloc(nentries, sizeof(v_entry));
+	newv = rule_vinit(len);
 	if (newv != NULL) {
 		for (i = 0; i < nentries; i++)
-			newv[i] = rule->truthtable[i];
+			newv[i] = vector[i];
 	}
 	return (newv);
-}
-
-/*
- * Given a rule and a captures array, compute (rule.tt & ~captures)
- */
-v_entry *
-rule_tt_andnot(rule_t *rule, v_entry *captures,
-    int nsamples, v_entry *ret_vec, int *ret_support)
-{
-	v_entry *tt;
-	int i, count, nentries;
-
-	nentries = (nsamples + BITS_PER_ENTRY - 1)/BITS_PER_ENTRY;
-	if (ret_vec == NULL)
-		ret_vec = calloc(nentries, sizeof(v_entry));
-	if (ret_vec != NULL) {
-		count = 0;
-		for (i = 0; i < nentries; i++) {
-			ret_vec[i] = rule->truthtable[i] & (~captures[i]);
-			count += count_ones(ret_vec[i]);
-		}
-		*ret_support = count;
-	}
-	return (ret_vec);
-}
-
-/*
- * Given a rule and a captures array, compute (rule.tt | captures)
- */
-v_entry *
-rule_tt_or(rule_t *rule, v_entry *captures,
-    int nsamples, v_entry *ret_vec, int *ret_support)
-{
-	v_entry *tt;
-	int i, count, nentries;
-
-	nentries = (nsamples + BITS_PER_ENTRY - 1)/BITS_PER_ENTRY;
-	if (ret_vec == NULL)
-		ret_vec = calloc(nentries, sizeof(v_entry));
-	if (ret_vec != NULL) {
-		count = 0;
-		for (i = 0; i < nentries; i++) {
-			ret_vec[i] = rule->truthtable[i] | captures[i];
-			count += count_ones(ret_vec[i]);
-		}
-		*ret_support = count;
-	}
-	return (ret_vec);
-}
-
-/*
- * Given a rule and a captures array, compute (rule.tt & captures)
- */
-v_entry *
-rule_tt_and(rule_t *rule, v_entry *captures,
-    int nsamples, v_entry *ret_vec, int *ret_support)
-{
-	v_entry *tt;
-	int i, count, nentries;
-
-	nentries = (nsamples + BITS_PER_ENTRY - 1)/BITS_PER_ENTRY;
-	if (ret_vec == NULL)
-		ret_vec = calloc(nentries, sizeof(v_entry));
-	if (ret_vec != NULL) {
-		count = 0;
-		for (i = 0; i < nentries; i++) {
-			ret_vec[i] = rule->truthtable[i] & captures[i];
-			count += count_ones(ret_vec[i]);
-		}
-		*ret_support = count;
-	}
-	return (ret_vec);
 }
 
 /*
@@ -442,7 +390,7 @@ rule_tt_and(rule_t *rule, v_entry *captures,
  * 	then swap positions i and j
  */
 int
-rule_swap(ruleset_t *rs, int i, int j, rule_t *rules)
+ruleset_swap(ruleset_t *rs, int i, int j, rule_t *rules)
 {
 	int ndx, nset;
 	v_entry *caught, *orig_i, *orig_j, *tt_j;
@@ -462,16 +410,16 @@ rule_swap(ruleset_t *rs, int i, int j, rule_t *rules)
 	 */
 	caught = NULL;
 	if (i != 0) {
-		caught = 
-		    rule_tt_copy(rules + rs->rules[0].rule_id, rs->n_samples);
+		caught = rule_copy(rules[rs->rules[0].rule_id].truthtable,
+		    rs->n_samples);
 		if (caught == NULL)
 			return (errno);
 		for (ndx = 1; ndx < i; ndx++)
-			caught = rule_vor(caught, 
-			    rs->rules[ndx].captures, rs->n_samples);
+			rule_vor(caught, caught,
+			    rs->rules[ndx].captures, rs->n_samples, &nset);
 	}
 
-	orig_i = rule_vandnot(orig_i,
+	rule_vandnot(orig_i, orig_i,
 	    rules[rs->rules[j].rule_id].truthtable, rs->n_samples, &nset);
 	rs->rules[i].ncaptured = nset;
 
@@ -482,13 +430,14 @@ rule_swap(ruleset_t *rs, int i, int j, rule_t *rules)
 	if (caught == NULL) {
 		/* This is wasteful -- doing an extra allocation. */
 		rs->rules[j].captures =
-		    rule_tt_copy(rules + rs->rules[j].rule_id, rs->n_samples);
+		    rule_copy(rules[rs->rules[j].rule_id].truthtable,
+		    rs->n_samples);
 		rs->rules[j].ncaptured = rules[rs->rules[j].rule_id].support;
 		free(orig_j);
 		orig_j = NULL;
 	} else {
-		orig_j = rule_tt_andnot(rules + rs->rules[j].rule_id,
-		    caught, rs->n_samples, orig_j, &nset);
+		rule_vandnot(orig_j, rules[rs->rules[j].rule_id].truthtable,
+		    caught, rs->n_samples, &nset);
 		rs->rules[j].ncaptured = nset;
 	}
 
@@ -501,31 +450,63 @@ rule_swap(ruleset_t *rs, int i, int j, rule_t *rules)
 	return (0);
 }
 
-v_entry *
-rule_vor(v_entry *cumulative, v_entry *new, int nsamples)
+void
+rule_vand(v_entry *dest, v_entry *src1, v_entry *src2, int nsamples, int *cnt)
 {
 	int i, count, nentries;
 
+	count = 0;
 	nentries = (nsamples + BITS_PER_ENTRY - 1)/BITS_PER_ENTRY;
-	for (i = 0; i < nentries; i++)
-		cumulative[i] = cumulative[i] | new[i];
-	return (cumulative);
+	if (dest == NULL)
+		dest = rule_vinit(nsamples);
+	if (dest != NULL) {
+		for (i = 0; i < nentries; i++) {
+			dest[i] = src1[i] & src2[i];
+			count += count_ones(dest[i]);
+		}
+		*cnt = count;
+	}
+	return;
 }
 
-v_entry *
-rule_vandnot(v_entry *cumulative, v_entry *new, int nsamples, int *ret_cnt)
+void
+rule_vor(v_entry *dest, v_entry *src1, v_entry *src2, int nsamples, int *cnt)
+{
+	int i, count, nentries;
+
+	count = 0;
+	nentries = (nsamples + BITS_PER_ENTRY - 1)/BITS_PER_ENTRY;
+	if (dest == NULL)
+		dest = rule_vinit(nentries);
+	if (dest != NULL) {
+		for (i = 0; i < nentries; i++) {
+			dest[i] = src1[i] | src2[i];
+			count += count_ones(dest[i]);
+		}
+		*cnt = count;
+	}
+	return;
+}
+
+void
+rule_vandnot(v_entry *dest,
+    v_entry *src1, v_entry *src2, int nsamples, int *ret_cnt)
 {
 	int i, count, nentries;
 
 	nentries = (nsamples + BITS_PER_ENTRY - 1)/BITS_PER_ENTRY;
 	count = 0;
-	for (i = 0; i < nentries; i++) {
-		cumulative[i] = cumulative[i] & ~new[i];
-		count += count_ones(cumulative[i]);
-	}
+	if (dest == NULL)
+		dest = rule_vinit(nentries);
+	if (dest != NULL) {
+		for (i = 0; i < nentries; i++) {
+			dest[i] = src1[i] & ~src2[i];
+			count += count_ones(dest[i]);
+		}
 
-	*ret_cnt = count;
-	return (cumulative);
+		*ret_cnt = count;
+	}
+	return;
 }
 
 int
