@@ -1,20 +1,40 @@
 These are tools to experiment with representations and approaches to handling
 rulesets.
 
+Rules have support and then a bit vector (or GMP bignum) representing the
+samples for which the rule applies.
+
+A ruleset is a collection of rules and a captures vector/bignum associated
+with each rule indicating which samples get captured by which rule.
+
 makedata.py: Transform data sets into something easily read into a C program
 	Assumes input files in the *.TAB and *.Y formats and produces a .out
 	format of <rule, truthtable> tuples where entry i in the truthtable
-	contains either an ascii 1 or ascii 0 indicating if the rule applies to the 
-	ith sample in the training data.
+	contains either an ascii 1 or ascii 0 indicating if the rule applies
+	to the ith sample in the training data.
 
-analyze.c:	Routines to read in the data from makedata, create random rulesets,
-		and perform additions, removals, and swaps on said rulesets.
+	Usage: (from within python)
+	from makedata import *
+	get_freqitemsets("basename")
+
+	where basename would be something like adult2_train and the files
+	adult2_train.TAB and adult2_train.Y exist. The function will output
+	adult2_train.out
+
+
+analyze.c:	Driver program that:
+	1. Calls rules_init to read in the data produced by makedata
+	2. Executes [-i iterations] (default 10) of:
+		3. Create random ruleset of [-s size] (default 3)
+		4. Performs size^2 adjacent swaps
+		5. Performs size delete/add pairs
 
 rulelib.c:	Library of routines for manipulating rules and rulesets.
+	See rule.h for function prototypes exported.
 
 
 Compile options:
 
-This package compiles both with and without the GMP library.  Without it, bit vector
-operations are coded manually; with GMP, we leverage the high performance bit vector
-operations.
+This package compiles both with and without the GMP library.  Without it,
+bit vector operations are coded manually as arrays of long longs. With -D GMP,
+we store the vectors as bignums.
