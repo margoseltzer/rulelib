@@ -2,7 +2,6 @@
  * Copyright 2015 President and Fellows of Harvard College.
  * All rights reserved.
  */
-
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
@@ -12,7 +11,7 @@
 #include "rule.h"
 
 /* Function declarations. */
-v_entry *ascii_to_vector(char *, size_t, int *, int *);
+int ascii_to_vector(char *, size_t, int *, int *, VECTOR *);
 #define RULE_INC 100
 #define BITS_PER_ENTRY (sizeof(v_entry) * 8)
 
@@ -76,10 +75,15 @@ rules_init(const char *infile, int *nrules, int *nsamples, rule_t **rules_ret)
 		if ((rules[rule_cnt].features = malloc(rulelen)) == NULL)
 			goto err;
 		(void)strncpy(rules[rule_cnt].features, rulestr, rulelen);
-		rules[rule_cnt].truthtable = 
-		    ascii_to_vector(line, len, &sample_cnt, &ones);
-		if (rules[rule_cnt].truthtable == NULL)
-			goto err;
+		/*
+		 * At this point "len" is a line terminated by a newline
+		 * at line[len-1]; let's make it a NUL and shorten the line
+		 * length by one.
+		 */
+		line[len-1] = '\0';
+		if (ascii_to_vector(line, len, &sample_cnt, &ones,
+		    &rules[rule_cnt].truthtable) != 0)
+		    	goto err;
 		rules[rule_cnt].support = ones;
 		rule_cnt++;
 	}
@@ -99,7 +103,11 @@ err:
 	if (rules != NULL) {
 		for (i = 0; i < rule_cnt; i++) {
 			free(rules[i].features);
+#ifdef GMP
+			mpz_clear(rules[i].truthtable);
+#else
 			free(rules[i].truthtable);
+#endif
 		}	
 		free(rules);
 	}
@@ -108,13 +116,19 @@ err:
 }
 
 /* Malloc a vector to contain nsamples bits. */
-v_entry *
-rule_vinit(int len)
+int
+rule_vinit(int len, VECTOR *ret)
 {
+#ifdef GMP
+	mpz_init(*ret);
+#else
 	int nentries;
 
 	nentries = (len + BITS_PER_ENTRY - 1)/BITS_PER_ENTRY;
-	return (calloc(nentries, sizeof(v_entry)));
+	if ((*ret = calloc(nentries, sizeof(v_entry))) == NULL)
+		return(errno);
+#endif
+	return (0);
 }
 
 /*
@@ -122,9 +136,25 @@ rule_vinit(int len)
  * This is a hand-coded naive implementation; we'll also support
  * the GMP library, switching between the two with a compiler directive.
  */
-v_entry *
-ascii_to_vector(char *line, size_t len, int *nsamples, int *nones)
+int
+ascii_to_vector(char *line, size_t len, int *nsamples, int *nones, VECTOR *ret)
 {
+#ifdef GMP
+	int retval;
+	size_t s;
+
+	if (mpz_init_set_str(*ret, line, 2) != 0) {
+		retval = errno;
+		mpz_clear(*ret);
+		return (retval);
+	}
+	if ((s = mpz_sizeinbase (*ret, 2)) > (size_t) *nsamples)
+		*nsamples = (int) s;
+		
+	*nones = mpz_popcount(*ret);
+	mpz_out_str(stdout, 2, *ret);
+	return (0);
+#else
 	/*
 	 * If *nsamples is 0, then we will set it to the number of
 	 * 0's and 1's. If it is non-zero, then we'll ensure that
@@ -144,9 +174,8 @@ ascii_to_vector(char *line, size_t len, int *nsamples, int *nones)
 		bufsize = (len + BITS_PER_ENTRY - 1) / BITS_PER_ENTRY;
 	else
 		bufsize = (*nsamples + BITS_PER_ENTRY - 1) / BITS_PER_ENTRY;
-	buf = malloc(bufsize * sizeof(v_entry));
-	if (buf == NULL)
-		return(NULL);
+	if ((buf = malloc(bufsize * sizeof(v_entry))) == NULL)
+		return(errno);
 	
 	bufp = buf;
 	val = 0;
@@ -192,18 +221,20 @@ ascii_to_vector(char *line, size_t len, int *nsamples, int *nones)
 		buf = NULL;
 	}
 	*nones = ones;
-	return (buf);
+	*ret = buf;
+	return (0);
+#endif
 }
 
 int
 ruleset_init(int nrules,
     int nsamples, int *idarray, rule_t *rules, ruleset_t **retruleset)
 {
-	int i, tmp;
+	int i, ret, tmp;
 	rule_t *cur_rule;
 	ruleset_t *rs;
 	ruleset_entry_t *cur_re;
-	v_entry *all_captured = NULL;
+	VECTOR all_captured;
 
 	/*
 	 * Allocate space for the ruleset structure and the ruleset entries.
@@ -219,7 +250,11 @@ ruleset_init(int nrules,
 	rs->n_rules = nrules;
 	rs->n_alloc = nrules;
 	rs->n_samples = nsamples;
-	rs->rules = (ruleset_entry_t *)(rs + 1);
+#ifdef GMP
+	mpz_init(all_captured);
+#else
+	all_captured = NULL;
+#endif
 
 	for (i = 0; i < nrules; i++) {
 		cur_rule = rules + idarray[i];
@@ -227,17 +262,17 @@ ruleset_init(int nrules,
 		cur_re->rule_id = idarray[i];
 
 		if (i == 0) {
-			if ((cur_re->captures = rule_vinit(nsamples)) == NULL)
+			if (rule_vinit(nsamples, &cur_re->captures) != 0)
 				goto err1;
-			cur_re->captures =
-			    rule_copy(cur_rule->truthtable, nsamples);
+			if ((ret = rule_copy(&cur_re->captures,
+			    cur_rule->truthtable, nsamples)) != 0)
+			    	goto err1;
 			cur_re->ncaptured = cur_rule->support;
-			all_captured =
-			    rule_copy(cur_rule->truthtable, nsamples);
-			if (all_captured == NULL)
-				goto err1;
+			if ((ret = rule_copy(&all_captured,
+			    cur_rule->truthtable, nsamples)) != 0)
+			    	goto err1;
 		} else {
-			if ((cur_re->captures = rule_vinit(nsamples)) == NULL)
+			if (rule_vinit(nsamples, &cur_re->captures) != 0)
 				goto err1;
 			rule_vandnot(cur_re->captures, cur_rule->truthtable,
 			    all_captured, nsamples, &cur_re->ncaptured);
@@ -249,17 +284,28 @@ ruleset_init(int nrules,
 		}
 	}
 	*retruleset = rs;
+#ifdef GMP
+	mpz_clear(all_captured);
+#else
 	if (all_captured != NULL)
 		free(all_captured);
+#endif
 	return (0);
 
 err1:
+#ifdef GMP
+	mpz_clear(all_captured);
+#else
 	if (all_captured != NULL)
 		free(all_captured);
+#endif
 	for (int j = 0; j <= i; j++)
+#ifdef GMP
+		mpz_clear(rs->rules[i].captures);
+#else
 		if (rs->rules[i].captures != NULL)
 			free (rs->rules[i].captures);
-
+#endif
 	return (ENOMEM);
 }
 
@@ -270,9 +316,9 @@ err1:
 int
 ruleset_add(rule_t *rules, int nrules, ruleset_t *rs, int newrule, int ndx)
 {
-	int i, tmp;
+	int i, ret, tmp;
 	rule_t *expand;
-	v_entry *captured;
+	VECTOR captured;
 
 	/* Check for space. */
 	if (rs->n_alloc < rs->n_rules + 1) {
@@ -294,15 +340,15 @@ ruleset_add(rule_t *rules, int nrules, ruleset_t *rs, int newrule, int ndx)
 	 * 2. Add rule into ruleset.
 	 * 3. Compute new captures for all rules following the new one.
 	 */
-	if (ndx == 0)
-		captured = rule_copy(rules[newrule].truthtable, rs->n_samples);
-		if (captured == NULL)
-			return (errno);
-	else  {
-		captured = rule_copy(rules[rs->rules[0].rule_id].truthtable,
-		        rs->n_samples);
-		if (captured == NULL)
-			return (errno);
+	if (ndx == 0) {
+		if ((ret = rule_copy(&captured,
+			rules[newrule].truthtable, rs->n_samples)) != 0)
+			return (ret);
+	} else  {
+		if ((ret = rule_copy(&captured,
+		    rules[rs->rules[0].rule_id].truthtable,
+		    rs->n_samples)) != 0)
+			return (ret);
 
 		for (i = 1; i < ndx; i++)
 			rule_vor(captured, captured,
@@ -312,7 +358,7 @@ ruleset_add(rule_t *rules, int nrules, ruleset_t *rs, int newrule, int ndx)
 
 	}
 	rs->rules[ndx].rule_id = newrule;
-	rs->rules[ndx].captures = captured;
+	VECTOR_ASSIGN(rs->rules[ndx].captures, captured);
 	rs->n_rules++;
 
 	for (i = ndx + 1; i < rs->n_rules; i++)
@@ -330,18 +376,18 @@ void
 ruleset_delete(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
 {
 	int i, nset;
-	v_entry *curvec, *oldv, *tmp_vec;
+	VECTOR curvec, oldv, tmp_vec;
 
 	/* Compute new captures for all rules following the one at ndx.  */
-	oldv = rs->rules[ndx].captures;
-	if ((tmp_vec = rule_vinit(rs->n_samples)) == NULL)
+	VECTOR_ASSIGN(oldv, rs->rules[ndx].captures);
+	if (rule_vinit(rs->n_samples, &tmp_vec) != 0)
 		return;
 	for (i = ndx + 1; i < rs->n_rules; i++) {
 		/*
 		 * My new captures is my old captures or'd with anything that
 		 * was captured by ndx and is captured by my rule.
 		 */
-		curvec = rs->rules[i].captures;
+		VECTOR_ASSIGN(curvec, rs->rules[i].captures);
 		rule_vand(tmp_vec, rules[rs->rules[i].rule_id].truthtable,
 		    oldv, rs->n_samples, &nset);
 		rs->rules[i].ncaptured += nset;
@@ -355,8 +401,13 @@ ruleset_delete(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
 	}
 
 	/* Now remove alloc'd data for rule at ndx. */
+#ifdef GMP
+	mpz_clear(tmp_vec);
+	mpz_clear(oldv);
+#else
 	(void)free(tmp_vec);
 	(void)free(oldv);
+#endif
 
 	/* Shift up cells if necessary. */
 	if (ndx != rs->n_rules - 1)
@@ -367,19 +418,21 @@ ruleset_delete(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
 	return;
 }
 
-v_entry *
-rule_copy(v_entry *vector, int len)
+int
+rule_copy(VECTOR *dest, VECTOR src, int len)
 {
-	v_entry *newv, *tt;
+#ifdef GMP
+	mpz_init_set(*dest, src);
+	return (0);
+#else
 	int i, nentries;
 
 	nentries = (len + BITS_PER_ENTRY - 1)/BITS_PER_ENTRY;
-	newv = rule_vinit(len);
-	if (newv != NULL) {
+	if (rule_vinit(len, dest) != 0)
 		for (i = 0; i < nentries; i++)
-			newv[i] = vector[i];
-	}
-	return (newv);
+			(*dest)[i] = src[i];
+	return (errno);
+#endif
 }
 
 /*
@@ -392,28 +445,31 @@ rule_copy(v_entry *vector, int len)
 int
 ruleset_swap(ruleset_t *rs, int i, int j, rule_t *rules)
 {
-	int ndx, nset;
-	v_entry *caught, *orig_i, *orig_j, *tt_j;
+	int ndx, nset, ret;
+	VECTOR caught, orig_i, orig_j, tt_j;
 	ruleset_entry_t re;
 
 	assert(i <= rs->n_rules);
 	assert(j <= rs->n_rules);
 	assert(i + 1 == j);
 
-	orig_i = rs->rules[i].captures;
-	orig_j = rs->rules[j].captures;
+	VECTOR_ASSIGN(orig_i, rs->rules[i].captures);
+	VECTOR_ASSIGN(orig_j, rs->rules[j].captures);
 
 	/*
 	 * Compute newly caught in two steps: first compute everything
 	 * caught in rules 0 to i-1, the compute everything from rule J
 	 * that was caught by i and was NOT caught by the previous sum
 	 */
+#ifdef GMP
+	mpz_init(caught);
+#else
 	caught = NULL;
+#endif
 	if (i != 0) {
-		caught = rule_copy(rules[rs->rules[0].rule_id].truthtable,
-		    rs->n_samples);
-		if (caught == NULL)
-			return (errno);
+		if ((ret = rule_copy(&caught,
+		    rules[rs->rules[0].rule_id].truthtable, rs->n_samples)) != 0)
+			return (ret);
 		for (ndx = 1; ndx < i; ndx++)
 			rule_vor(caught, caught,
 			    rs->rules[ndx].captures, rs->n_samples, &nset);
@@ -427,14 +483,18 @@ ruleset_swap(ruleset_t *rs, int i, int j, rule_t *rules)
 	 * If we are about to become the first rule, then our captures array
 	 * is simply our initial truth table.
 	 */
-	if (caught == NULL) {
-		/* This is wasteful -- doing an extra allocation. */
-		rs->rules[j].captures =
-		    rule_copy(rules[rs->rules[j].rule_id].truthtable,
-		    rs->n_samples);
+	if (i == 0) {
+		/* XXX This is wasteful -- doing an extra allocation. */
+		if ((ret = rule_copy(&rs->rules[j].captures,
+		    rules[rs->rules[j].rule_id].truthtable, rs->n_samples)) != 0)
+			return (ret);
 		rs->rules[j].ncaptured = rules[rs->rules[j].rule_id].support;
+#ifdef GMP
+		mpz_clear(orig_j);
+#else
 		free(orig_j);
 		orig_j = NULL;
+#endif
 	} else {
 		rule_vandnot(orig_j, rules[rs->rules[j].rule_id].truthtable,
 		    caught, rs->n_samples, &nset);
@@ -446,20 +506,27 @@ ruleset_swap(ruleset_t *rs, int i, int j, rule_t *rules)
 	rs->rules[i] = rs->rules[j];
 	rs->rules[j] = re;
 
+#ifdef GMP
+	mpz_clear(caught);
+#else
 	free(caught);
+#endif
 	return (0);
 }
 
 void
-rule_vand(v_entry *dest, v_entry *src1, v_entry *src2, int nsamples, int *cnt)
+rule_vand(VECTOR dest, VECTOR src1, VECTOR src2, int nsamples, int *cnt)
 {
+#ifdef GMP
+	mpz_and(dest, src1, src2);
+	*cnt = 0;
+	*cnt = mpz_popcount(dest);
+#else
 	int i, count, nentries;
 
 	count = 0;
 	nentries = (nsamples + BITS_PER_ENTRY - 1)/BITS_PER_ENTRY;
-	if (dest == NULL)
-		dest = rule_vinit(nsamples);
-	if (dest != NULL) {
+	if (rule_vinit(nsamples, &dest) == 0) {
 		for (i = 0; i < nentries; i++) {
 			dest[i] = src1[i] & src2[i];
 			count += count_ones(dest[i]);
@@ -467,18 +534,25 @@ rule_vand(v_entry *dest, v_entry *src1, v_entry *src2, int nsamples, int *cnt)
 		*cnt = count;
 	}
 	return;
+#endif
 }
 
 void
-rule_vor(v_entry *dest, v_entry *src1, v_entry *src2, int nsamples, int *cnt)
+rule_vor(VECTOR dest, VECTOR src1, VECTOR src2, int nsamples, int *cnt)
 {
+#ifdef GMP
+	mpz_ior(dest, src1, src2);
+	*cnt = 0;
+	*cnt = mpz_popcount(dest);
+#else
 	int i, count, nentries;
 
 	count = 0;
 	nentries = (nsamples + BITS_PER_ENTRY - 1)/BITS_PER_ENTRY;
-	if (dest == NULL)
-		dest = rule_vinit(nentries);
-	if (dest != NULL) {
+#ifndef GMP
+	if (dest == NULL && (rule_vinit(nentries, &dest) == 0))
+#endif
+	{
 		for (i = 0; i < nentries; i++) {
 			dest[i] = src1[i] | src2[i];
 			count += count_ones(dest[i]);
@@ -486,19 +560,27 @@ rule_vor(v_entry *dest, v_entry *src1, v_entry *src2, int nsamples, int *cnt)
 		*cnt = count;
 	}
 	return;
+#endif
 }
 
 void
-rule_vandnot(v_entry *dest,
-    v_entry *src1, v_entry *src2, int nsamples, int *ret_cnt)
+rule_vandnot(VECTOR dest,
+    VECTOR src1, VECTOR src2, int nsamples, int *ret_cnt)
 {
+#ifdef GMP
+	mpz_com(dest, src2);
+	mpz_and(dest, src1, dest);
+	*ret_cnt = 0;
+	*ret_cnt = mpz_popcount(dest);
+#else
 	int i, count, nentries;
 
 	nentries = (nsamples + BITS_PER_ENTRY - 1)/BITS_PER_ENTRY;
 	count = 0;
-	if (dest == NULL)
-		dest = rule_vinit(nentries);
-	if (dest != NULL) {
+#ifndef GMP
+	if (dest == NULL && (rule_vinit(nentries, &dest) == 0))
+#endif
+	{
 		for (i = 0; i < nentries; i++) {
 			dest[i] = src1[i] & ~src2[i];
 			count += count_ones(dest[i]);
@@ -507,6 +589,7 @@ rule_vandnot(v_entry *dest,
 		*ret_cnt = count;
 	}
 	return;
+#endif
 }
 
 int
@@ -555,13 +638,18 @@ rule_print(rule_t *rules, int ndx, int n)
 }
 
 void
-rule_vector_print(v_entry *v, int n)
+rule_vector_print(VECTOR v, int n)
 {
+#ifdef GMP
+	mpz_out_str(stdout, 16, v);
+	printf("\n");
+#else
 	int i;
 
 	for (i = 0; i < n; i++)
 		printf("0x%lx ", v[i]);
 	printf("\n");
+#endif
 
 }
 

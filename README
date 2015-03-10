@@ -1,32 +1,20 @@
 These are tools to experiment with representations and approaches to handling
 rulesets.
 
-makedata.py: Transform data sets into something I can easily read into a C program
-	in which I can manipulate the data
+makedata.py: Transform data sets into something easily read into a C program
+	Assumes input files in the *.TAB and *.Y formats and produces a .out
+	format of <rule, truthtable> tuples where entry i in the truthtable
+	contains either an ascii 1 or ascii 0 indicating if the rule applies to the 
+	ith sample in the training data.
 
 analyze.c:	Routines to read in the data from makedata, create random rulesets,
 		and perform additions, removals, and swaps on said rulesets.
 
-Logic of capture management:
-
-1. Remove ith rule from a ruleset
-
-foreach j > i
-	let caught = j.tt & i.captures
-	j.captures = j.captures | caught
-	i.captures & ~caught
-
-2. Add a rule (n) into the ith slot of a ruleset (sliding those in slots > i
-down one).
-
-caught = forall j < i j.captures
-n.captures = n.tt & ~caught
-foreach j > i
-	j.captures = j.captures & ~n.captures
+rulelib.c:	Library of routines for manipulating rules and rulesets.
 
 
-3. Swap see code
+Compile options:
 
-TODO: I don't think I need two sets of vector operations -- (right now
-I have pure vector and then some with rule and vector)  Pure vector will
-also be better for converting to GMP
+This package compiles both with and without the GMP library.  Without it, bit vector
+operations are coded manually; with GMP, we leverage the high performance bit vector
+operations.

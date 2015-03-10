@@ -3,6 +3,10 @@
  * All rights reserved.
  */
 
+#ifdef GMP
+#include <gmp.h>
+#endif
+
 /*
  * This library implements rule set management for Bayesian rule lists.
  */
@@ -32,6 +36,15 @@
  * Define types for bit vectors.
  */
 typedef unsigned long v_entry;
+#ifdef GMP
+typedef mpz_t VECTOR;
+#define VECTOR_ASSIGN(dest, src) mpz_init_set(dest, src)
+#else
+typedef v_entry *VECTOR;
+#define VECTOR_ASSIGN(dest, src) dest = src
+#endif
+
+
 
 /*
  * We have slightly different structures to represent the original rules 
@@ -42,20 +55,20 @@ typedef unsigned long v_entry;
 typedef struct rule {
 	char *features;			/* Representation of the rule. */
 	int support;			/* Number of 1's in truth table. */
-	v_entry *truthtable;		/* Truth table; one bit per sample. */
+	VECTOR truthtable;		/* Truth table; one bit per sample. */
 } rule_t;
 
 typedef struct ruleset_entry {
 	unsigned rule_id;
 	int ncaptured;			/* Number of 1's in bit vector. */
-	v_entry	 *captures;		/* Bit vector. */
+	VECTOR captures;		/* Bit vector. */
 } ruleset_entry_t;
 
 typedef struct ruleset {
 	int n_rules;			/* Number of actual rules. */
 	int n_alloc;			/* Spaces allocated for rules. */
 	int n_samples;
-	ruleset_entry_t *rules;	/* Array of rules. */
+	ruleset_entry_t rules[];	/* Array of rules. */
 } ruleset_t;
 
 /*
@@ -72,11 +85,11 @@ int rules_init(const char *, int *, int *, rule_t **);
 
 void rule_print(rule_t *, int, int);
 void rule_print_all(rule_t *, int, int);
-void rule_vector_print(v_entry *, int);
+void rule_vector_print(VECTOR, int);
 
-v_entry *rule_copy(v_entry *, int);
-v_entry *rule_vinit(int);
-void rule_vand(v_entry *, v_entry *, v_entry *, int, int *);
-void rule_vandnot(v_entry *, v_entry *, v_entry *, int, int *);
-void rule_vor(v_entry *, v_entry *, v_entry *, int, int *);
+int rule_copy(VECTOR *, VECTOR, int);
+int rule_vinit(int, VECTOR *);
+void rule_vand(VECTOR, VECTOR, VECTOR, int, int *);
+void rule_vandnot(VECTOR, VECTOR, VECTOR, int, int *);
+void rule_vor(VECTOR, VECTOR, VECTOR, int, int *);
 int count_ones(v_entry);
