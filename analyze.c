@@ -32,7 +32,7 @@ int
 usage(void)
 {
 	(void)fprintf(stderr, "Usage: analyze [-d] [-s ruleset-size] %s\n",
-	    "[-i cmdfile] [-S seed]");
+	    "[-c cmdfile] [-i iterations] [-S seed]");
 	return (-1);
 }
 
@@ -42,19 +42,23 @@ main (int argc, char *argv[])
 	extern char *optarg;
 	extern int optind, optopt, opterr, optreset;
 	int ret, size = DEFAULT_RULESET_SIZE;
-	int nrules, nsamples;
+	int iters, nrules, nsamples;
 	char ch, *cmdfile = NULL, *infile;
 	rule_t *rules;
 	struct timeval tv_acc, tv_start, tv_end;
 
 	debug = 0;
+	iters = 10;
 	while ((ch = getopt(argc, argv, "di:s:S:")) != EOF)
 		switch (ch) {
+		case 'c':
+			cmdfile = optarg;
+			break;
 		case 'd':
 			debug = 1;
 			break;
 		case 'i':
-			cmdfile = optarg;
+			iters = atoi(optarg);
 			break;
 		case 's':
 			size = atoi(optarg);
@@ -89,7 +93,7 @@ main (int argc, char *argv[])
 	/*
 	 * Add number of iterations for first parameter
 	 */
-	run_experiment(10, size, nsamples, nrules, rules);
+	run_experiment(iters, size, nsamples, nrules, rules);
 }
 
 int

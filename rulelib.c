@@ -152,7 +152,6 @@ ascii_to_vector(char *line, size_t len, int *nsamples, int *nones, VECTOR *ret)
 		*nsamples = (int) s;
 		
 	*nones = mpz_popcount(*ret);
-	mpz_out_str(stdout, 2, *ret);
 	return (0);
 #else
 	/*

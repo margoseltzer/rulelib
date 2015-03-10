@@ -5,7 +5,8 @@ INCLUDES = -I. -I/opt/local/include
 # Put this here so we can specify something like -DGMP to switch between
 # representations.
 CC = cc
-CFLAGS = -g $(INCLUDES) -DGMP
+CFLAGS = -g $(INCLUDES) 
+#-DGMP
 LIBS = -L/opt/local/lib -lgmp -lc
 
 $(TARGET) : $(OBJECTS)
