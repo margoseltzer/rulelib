@@ -86,8 +86,8 @@ int rules_init(const char *, int *, int *, rule_t **);
 void rule_print(rule_t *, int, int);
 void rule_print_all(rule_t *, int, int);
 void rule_vector_print(VECTOR, int);
+void rule_copy(VECTOR, VECTOR, int);
 
-int rule_copy(VECTOR *, VECTOR, int);
 int rule_vinit(int, VECTOR *);
 void rule_vand(VECTOR, VECTOR, VECTOR, int, int *);
 void rule_vandnot(VECTOR, VECTOR, VECTOR, int, int *);

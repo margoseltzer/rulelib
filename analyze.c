@@ -103,14 +103,17 @@ create_random_ruleset(int size,
 	int i, j, *ids, next, ret;
 
 	ids = calloc(size, sizeof(int));
-	for (i = 0; i < size; i++) {
-try_again:	next = RANDOM_RANGE(0, (nrules - 1));
+	for (i = 0; i < (size - 1); i++) {
+try_again:	next = RANDOM_RANGE(1, (nrules - 1));
 		/* Check for duplicates. */
 		for (j = 0; j < i; j++)
 			if (ids[j] == next)
 				goto try_again;
 		ids[i] = next;
 	}
+
+	/* Always put rule 0 (the default) as the last rule. */
+	ids[i] = 0;
 
 	return(ruleset_init(size, nsamples, ids, rules, rs));
 }
@@ -125,7 +128,7 @@ add_random_rule(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
 	int j, new_rule;
 
 pickrule:
-	new_rule = RANDOM_RANGE(0, (nrules-1));
+	new_rule = RANDOM_RANGE(1, (nrules-1));
 	for (j = 0; j < rs->n_rules; j++)
 		if (rs->rules[j].rule_id == new_rule)
 			goto pickrule;
