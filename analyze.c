@@ -20,7 +20,7 @@
 /* Convenient macros. */
 #define RANDOM_RANGE(lo, hi) \
     (unsigned)(lo + (unsigned)((random() / (float)RAND_MAX) * (hi - lo + 1)))
-#define DEFAULT_RULESET_SIZE  3
+#define DEFAULT_RULESET_SIZE  4
 
 void run_experiment(int, int, int, int, rule_t *);
 int debug;
@@ -157,11 +157,11 @@ run_experiment(int iters, int size, int nsamples, int nrules, rule_t *rules)
 			ruleset_print(rs, rules);
 		}
 
-		/* Now perform-size squared swaps */
+		/* Now perform-(size-2) squared swaps */
 		INIT_TIME(tv_acc);
 		START_TIME(tv_start);
 		for (j = 0; j < size; j++)
-			for (k = 1; k < size; k++) {
+			for (k = 1; k < (size-1); k++) {
 				if (debug)
 					printf("\nSwapping rules %d and %d\n",
 					    rs->rules[k-1].rule_id,
@@ -172,7 +172,7 @@ run_experiment(int iters, int size, int nsamples, int nrules, rule_t *rules)
 					ruleset_print(rs, rules);
 			}
 		END_TIME(tv_start, tv_end, tv_acc);
-		REPORT_TIME("analyze", "per swap", tv_acc, (size * size));
+		REPORT_TIME("analyze", "per swap", tv_acc, ((size-1) * (size-1)));
 
 		/*
 		 * Now remove a rule from each position, replacing it
@@ -180,7 +180,7 @@ run_experiment(int iters, int size, int nsamples, int nrules, rule_t *rules)
 		 */
 		INIT_TIME(tv_acc);
 		START_TIME(tv_start);
-		for (j = 0; j < size; j++) {
+		for (j = 0; j < (size - 1); j++) {
 			if (debug)
 				printf("\nDeleting rule %d\n", j);
 			ruleset_delete(rules, nrules, rs, j);
@@ -191,7 +191,7 @@ run_experiment(int iters, int size, int nsamples, int nrules, rule_t *rules)
 				ruleset_print(rs, rules);
 		}
 		END_TIME(tv_start, tv_end, tv_acc);
-		REPORT_TIME("analyze", "per add/del", tv_acc, (size * 2));
+		REPORT_TIME("analyze", "per add/del", tv_acc, ((size-1) * 2));
 	}
 
 }

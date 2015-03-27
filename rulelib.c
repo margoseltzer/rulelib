@@ -523,7 +523,6 @@ ruleset_swap(ruleset_t *rs, int i, int j, rule_t *rules)
 #ifdef GMP
 		mpz_clear(orig_j);
 #else
-		free(orig_j);
 		orig_j = NULL;
 #endif
 	} else {
@@ -610,8 +609,6 @@ rule_vandnot(VECTOR dest,
 	assert(dest != NULL);
 	for (i = 0; i < nentries; i++) {
 		dest[i] = src1[i] & ~src2[i];
-		printf("dest(%lx) = src1(%lx) & ~ src2(%lx)\n",
-			dest[i], src1[i], src2[i]);
 		count += count_ones(dest[i]);
 	}
 
