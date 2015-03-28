@@ -5,6 +5,7 @@
 
 #ifdef GMP
 #include <gmp.h>
+const int mp_bits_per_limb;
 #endif
 
 /*

@@ -247,9 +247,17 @@ int
 make_default(VECTOR *tt, int len)
 {
 #ifdef GMP
-	mpz_t v;
-	mpz_init2(v, len);
-	mpz_com(*tt, v);
+	/*
+	 * Since these are signed; make the size one larger, so that the high 
+	 * order bit will be 0
+	 */
+	mpz_init2(*tt, (len+1));
+	/*
+	 * This is ungodly slow, but the only way I could figure out how to do this
+	 * without converting this into a negative number.
+	 */
+	for (int i=0; i < len; i++)
+		mpz_setbit(*tt, i);
 	return (0);
 #else
 	int nbytes;
