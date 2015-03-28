@@ -90,6 +90,7 @@ void rule_vector_print(VECTOR, int);
 void rule_copy(VECTOR, VECTOR, int);
 
 int rule_vinit(int, VECTOR *);
+void rule_vdelete(mpz_t);
 void rule_vand(VECTOR, VECTOR, VECTOR, int, int *);
 void rule_vandnot(VECTOR, VECTOR, VECTOR, int, int *);
 void rule_vor(VECTOR, VECTOR, VECTOR, int, int *);

@@ -128,11 +128,7 @@ err:
 	if (rules != NULL) {
 		for (i = 1; i < rule_cnt; i++) {
 			free(rules[i].features);
-#ifdef GMP
-			mpz_clear(rules[i].truthtable);
-#else
-			free(rules[i].truthtable);
-#endif
+			rule_vdelete(rules[i].truthtable);
 		}	
 		free(rules);
 	}
@@ -154,6 +150,18 @@ rule_vinit(int len, VECTOR *ret)
 		return(errno);
 #endif
 	return (0);
+}
+
+void
+rule_vdelete(mpz_t v)
+{
+#ifdef GMP
+	mpz_clear(v);
+#else
+	if (v != NULL)
+		free(v);
+#endif
+	return;
 }
 
 /*
@@ -342,28 +350,14 @@ ruleset_init(int nrules,
 		}
 	}
 	*retruleset = rs;
-#ifdef GMP
-	mpz_clear(all_captured);
-#else
-	if (all_captured != NULL)
-		free(all_captured);
-#endif
+	
+	rule_vdelete(all_captured);
 	return (0);
 
 err1:
-#ifdef GMP
-	mpz_clear(all_captured);
-#else
-	if (all_captured != NULL)
-		free(all_captured);
-#endif
+	rule_vdelete(all_captured);
 	for (int j = 0; j <= i; j++)
-#ifdef GMP
-		mpz_clear(rs->rules[i].captures);
-#else
-		if (rs->rules[i].captures != NULL)
-			free (rs->rules[i].captures);
-#endif
+		rule_vdelete(rs->rules[i].captures);
 	return (ENOMEM);
 }
 
@@ -378,6 +372,8 @@ ruleset_add(rule_t *rules, int nrules, ruleset_t *rs, int newrule, int ndx)
 	rule_t *expand;
 	VECTOR captured;
 
+printf("ruleset_add: adding rule %d at position %d into ruleset:\n", newrule, ndx);
+ruleset_print(rs, rules);
 	/* Check for space. */
 	if (rs->n_alloc < rs->n_rules + 1) {
 		expand = realloc(rs->rules, 
@@ -399,28 +395,35 @@ ruleset_add(rule_t *rules, int nrules, ruleset_t *rs, int newrule, int ndx)
 	 * 3. Compute new captures for all rules following the new one.
 	 */
 	rule_vinit(rs->n_samples, &captured);
-	if (ndx == 0) {
-		rule_copy(captured, rules[newrule].truthtable, rs->n_samples);
-	} else  {
+	if (ndx != 0) {
 		rule_copy(captured,
 		    rules[rs->rules[0].rule_id].truthtable, rs->n_samples);
 
-		for (i = 1; i < ndx; i++)
+		for (i = 1; i < ndx; i++) {
 			rule_vor(captured, captured,
 			    rs->rules[i].captures, rs->n_samples, &tmp);
-		rule_vandnot(captured, rules[newrule].truthtable,
-		    captured, rs->n_samples, &rs->rules[ndx].ncaptured);
+		}
 
 	}
+printf("About to add rule; captured is: ");
+rule_vector_print(captured, rs->n_samples);
+	/* Insert new rule. */
 	rs->rules[ndx].rule_id = newrule;
-	VECTOR_ASSIGN(rs->rules[ndx].captures, captured);
 	rs->n_rules++;
 
-	for (i = ndx + 1; i < rs->n_rules; i++)
+	for (i = ndx; i < rs->n_rules; i++) {
 		rule_vandnot(rs->rules[i].captures,
-		    rules[rs->rules[i].rule_id].truthtable, rs->rules[i-1].captures,
+		    rules[rs->rules[i].rule_id].truthtable, captured,
 		    rs->n_samples, &rs->rules[i].ncaptured);
-		
+		rule_vor(captured,
+		    rs->rules[i].captures, captured, rs->n_samples, &tmp);
+printf("Rule %d with tt ", rs->rules[i].rule_id);
+rule_vector_print(rules[rs->rules[i].rule_id].truthtable, rs->n_samples);
+printf("Ruleset entry is now: ");
+rule_vector_print(rs->rules[i].captures, rs->n_samples);
+printf("Captured is now: ");
+rule_vector_print(captured, rs->n_samples);
+	}	
 	return(0);
 }
 
@@ -431,38 +434,35 @@ void
 ruleset_delete(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
 {
 	int i, nset;
-	VECTOR curvec, oldv, tmp_vec;
+	VECTOR tmp_vec;
 
-	/* Compute new captures for all rules following the one at ndx.  */
-	VECTOR_ASSIGN(oldv, rs->rules[ndx].captures);
 	if (rule_vinit(rs->n_samples, &tmp_vec) != 0)
 		return;
+	/*
+	 * Compute each following entry's new captures array which is its old
+	 * old captures array or'd with anything that was captured by ndx and
+	 * is captured by its rule.
+	 */
 	for (i = ndx + 1; i < rs->n_rules; i++) {
 		/*
-		 * My new captures is my old captures or'd with anything that
-		 * was captured by ndx and is captured by my rule.
+		 * tmp_vec is going to get all the rules that were captured
+		 * by the deleted rule that the current rule also captures.
 		 */
-		VECTOR_ASSIGN(curvec, rs->rules[i].captures);
 		rule_vand(tmp_vec, rules[rs->rules[i].rule_id].truthtable,
-		    oldv, rs->n_samples, &nset);
-		rs->rules[i].ncaptured += nset;
-		rule_vor(curvec, curvec, tmp_vec, rs->n_samples, &nset);
+		    rs->rules[ndx].captures, rs->n_samples, &nset);
+		rule_vor(rs->rules[i].captures, rs->rules[i].captures,
+		    tmp_vec, rs->n_samples, &rs->rules[i].ncaptured);
 
 		/*
-		 * Now remove the ones from oldv that just got set for rule
-		 * i because they should not be captured later.
+		 * We just captured some of the bits that the old rule used to
+		 * capture; remove them from the ones we're still trying to capture.
 		 */
-		rule_vandnot(oldv, oldv, curvec, rs->n_samples, &nset);
+		rule_vandnot(rs->rules[ndx].captures, rs->rules[ndx].captures,
+		    tmp_vec, rs->n_samples, &rs->rules[ndx].ncaptured);
 	}
 
-	/* Now remove alloc'd data for rule at ndx. */
-#ifdef GMP
-	mpz_clear(tmp_vec);
-	mpz_clear(oldv);
-#else
-	(void)free(tmp_vec);
-	(void)free(oldv);
-#endif
+	rule_vdelete(tmp_vec);
+	rule_vdelete(rs->rules[ndx].captures);
 
 	/* Shift up cells if necessary. */
 	if (ndx != rs->n_rules - 1)
@@ -500,66 +500,53 @@ int
 ruleset_swap(ruleset_t *rs, int i, int j, rule_t *rules)
 {
 	int ndx, nset, ret;
-	VECTOR caught, orig_i, orig_j, tt_j;
+	VECTOR caught;
 	ruleset_entry_t re;
 
 	assert(i <= rs->n_rules);
 	assert(j <= rs->n_rules);
 	assert(i + 1 == j);
 
-	VECTOR_ASSIGN(orig_i, rs->rules[i].captures);
-	VECTOR_ASSIGN(orig_j, rs->rules[j].captures);
-
-	/*
-	 * Compute newly caught in two steps: first compute everything
-	 * caught in rules 0 to i-1, the compute everything from rule J
-	 * that was caught by i and was NOT caught by the previous sum
-	 */
-	if ((ret = rule_vinit(rs->n_samples, &caught)) != 0)
-		return (ret);
-	if (i != 0) {
-		rule_copy(caught,
-		    rules[rs->rules[0].rule_id].truthtable, rs->n_samples);
-			return (ret);
-		for (ndx = 1; ndx < i; ndx++)
-			rule_vor(caught, caught,
-			    rs->rules[ndx].captures, rs->n_samples, &nset);
-	}
-
-	rule_vandnot(orig_i, orig_i,
-	    rules[rs->rules[j].rule_id].truthtable, rs->n_samples, &nset);
-	rs->rules[i].ncaptured = nset;
-
-	/*
-	 * If we are about to become the first rule, then our captures array
-	 * is simply our initial truth table.
-	 */
+	/* Compute the new J.*/
 	if (i == 0) {
-		/* XXX This is wasteful -- doing an extra allocation. */
+		/*
+		 * If J is about to become the first rule, then its captures
+		 * is simply its truthtable.
+		 */
 		rule_copy(rs->rules[j].captures,
 		    rules[rs->rules[j].rule_id].truthtable, rs->n_samples);
 		rs->rules[j].ncaptured = rules[rs->rules[j].rule_id].support;
-#ifdef GMP
-		mpz_clear(orig_j);
-#else
-		orig_j = NULL;
-#endif
 	} else {
-		rule_vandnot(orig_j, rules[rs->rules[j].rule_id].truthtable,
-		    caught, rs->n_samples, &nset);
-		rs->rules[j].ncaptured = nset;
+		/*
+		 * We need to find everything captured prior to i and then
+		 * set j's captured to be everything in its truth table minus
+		 * those already captured.
+		 */
+		if ((ret = rule_vinit(rs->n_samples, &caught)) != 0)
+			return (ret);
+		for (ndx = 0; ndx < i; ndx++)
+			rule_vor(caught, caught,
+			    rs->rules[ndx].captures, rs->n_samples, &nset);
+
+		rule_vandnot(rs->rules[j].captures,
+		    rules[rs->rules[j].rule_id].truthtable, caught,
+		    rs->n_samples, &rs->rules[j].ncaptured);
+		rule_vdelete(caught);
 	}
+
+	/*
+	 * Now, recompute i: it's everything it used to capture minus anything
+	 * in J's truth table.
+	 */
+	rule_vandnot(rs->rules[i].captures, rs->rules[i].captures,
+	    rules[rs->rules[j].rule_id].truthtable, rs->n_samples,
+	    &rs->rules[i].ncaptured);
 
 	/* Now swap the two entries */
 	re = rs->rules[i];
 	rs->rules[i] = rs->rules[j];
 	rs->rules[j] = re;
 
-#ifdef GMP
-	mpz_clear(caught);
-#else
-	free(caught);
-#endif
 	return (0);
 }
 
@@ -569,7 +556,6 @@ rule_vand(VECTOR dest, VECTOR src1, VECTOR src2, int nsamples, int *cnt)
 {
 #ifdef GMP
 	mpz_and(dest, src1, src2);
-	*cnt = 0;
 	*cnt = mpz_popcount(dest);
 #else
 	int i, count, nentries;
@@ -592,7 +578,6 @@ rule_vor(VECTOR dest, VECTOR src1, VECTOR src2, int nsamples, int *cnt)
 {
 #ifdef GMP
 	mpz_ior(dest, src1, src2);
-	*cnt = 0;
 	*cnt = mpz_popcount(dest);
 #else
 	int i, count, nentries;
