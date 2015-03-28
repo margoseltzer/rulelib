@@ -16,6 +16,16 @@ int make_default(VECTOR *, int);
 #define RULE_INC 100
 #define BITS_PER_ENTRY (sizeof(v_entry) * 8)
 
+#ifdef GMP
+/* This is an incredible hack -- in order not to make all my bitmasks
+ * into negative numbers when I compute the 1's complement of them, I
+ * need to mask out some bits.  I couldn't figure out a better way to
+ * do it than to use the xor of the default, so I turn it into a global
+ * that I use in vandnot.  Ugh.
+ */
+mpz_t mpz_hack_default_mask;
+#endif
+
 /* One-counting tools */
 int bit_ones[] = {0, 1, 3, 7, 15, 31, 63, 127};
 
@@ -258,6 +268,7 @@ make_default(VECTOR *tt, int len)
 	 */
 	for (int i=0; i < len; i++)
 		mpz_setbit(*tt, i);
+	mpz_init_set(mpz_hack_default_mask, *tt);
 	return (0);
 #else
 	int nbytes;
@@ -605,9 +616,17 @@ rule_vandnot(VECTOR dest,
     VECTOR src1, VECTOR src2, int nsamples, int *ret_cnt)
 {
 #ifdef GMP
-	mpz_com(dest, src2);
-	mpz_and(dest, src1, dest);
-	*ret_cnt = 0;
+	/*
+	 * In theory we should not need a tmp here, but in practice, without it,
+	 * using dest for both logical operations ends up failing, because dest
+	 * does not get overwritten.  No idea why.
+	 */
+	mpz_t tmp;
+
+	mpz_init(tmp);
+	mpz_xor(tmp, src2, mpz_hack_default_mask);
+	mpz_and(dest, src1, tmp);
+	mpz_clear(tmp);
 	*ret_cnt = mpz_popcount(dest);
 #else
 	int i, count, nentries;
