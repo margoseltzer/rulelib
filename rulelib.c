@@ -328,18 +328,16 @@ ruleset_init(int nrules,
 		cur_rule = rules + idarray[i];
 		cur_re = rs->rules + i;
 		cur_re->rule_id = idarray[i];
+		if (rule_vinit(nsamples, &cur_re->captures) != 0)
+			goto err1;
 
 		if (i == 0) {
-			if (rule_vinit(nsamples, &cur_re->captures) != 0)
-				goto err1;
 			rule_copy(cur_re->captures,
 			    cur_rule->truthtable, nsamples);
 			cur_re->ncaptured = cur_rule->support;
 			rule_copy(all_captured,
 			    cur_rule->truthtable, nsamples);
 		} else {
-			if (rule_vinit(nsamples, &cur_re->captures) != 0)
-				goto err1;
 			rule_vandnot(cur_re->captures, cur_rule->truthtable,
 			    all_captured, nsamples, &cur_re->ncaptured);
 
@@ -356,8 +354,10 @@ ruleset_init(int nrules,
 
 err1:
 	rule_vdelete(all_captured);
-	for (int j = 0; j <= i; j++)
+	for (int j = 0; j < i; j++)
 		rule_vdelete(rs->rules[i].captures);
+	free(rs);
+	*retruleset = NULL;
 	return (ENOMEM);
 }
 
@@ -372,8 +372,6 @@ ruleset_add(rule_t *rules, int nrules, ruleset_t *rs, int newrule, int ndx)
 	rule_t *expand;
 	VECTOR captured;
 
-printf("ruleset_add: adding rule %d at position %d into ruleset:\n", newrule, ndx);
-ruleset_print(rs, rules);
 	/* Check for space. */
 	if (rs->n_alloc < rs->n_rules + 1) {
 		expand = realloc(rs->rules, 
@@ -405,11 +403,11 @@ ruleset_print(rs, rules);
 		}
 
 	}
-printf("About to add rule; captured is: ");
-rule_vector_print(captured, rs->n_samples);
 	/* Insert new rule. */
 	rs->rules[ndx].rule_id = newrule;
 	rs->n_rules++;
+	if ((ret = rule_vinit(rs->n_samples, &rs->rules[ndx].captures)) != 0)
+		return (errno);
 
 	for (i = ndx; i < rs->n_rules; i++) {
 		rule_vandnot(rs->rules[i].captures,
@@ -417,12 +415,6 @@ rule_vector_print(captured, rs->n_samples);
 		    rs->n_samples, &rs->rules[i].ncaptured);
 		rule_vor(captured,
 		    rs->rules[i].captures, captured, rs->n_samples, &tmp);
-printf("Rule %d with tt ", rs->rules[i].rule_id);
-rule_vector_print(rules[rs->rules[i].rule_id].truthtable, rs->n_samples);
-printf("Ruleset entry is now: ");
-rule_vector_print(rs->rules[i].captures, rs->n_samples);
-printf("Captured is now: ");
-rule_vector_print(captured, rs->n_samples);
 	}	
 	return(0);
 }
