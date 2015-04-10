@@ -361,6 +361,15 @@ err1:
 	return (ENOMEM);
 }
 
+void
+ruleset_free(ruleset_t *rs)
+{
+	int i;
+	for (i = 0; i < rs->n_rules; i++)
+		rule_vdelete(rs->rules[i].captures);
+	free(rs);
+}
+
 /*
  * Add the specified rule to the ruleset at position ndx (shifting
  * all rules after ndx down by one).
@@ -695,5 +704,6 @@ rule_print_all(rule_t *rules, int nrules, int nsamples)
 	for (i = 0; i < nrules; i++)
 		rule_print(rules, i, n);
 }
+
 
 

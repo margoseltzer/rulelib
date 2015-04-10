@@ -192,6 +192,7 @@ run_experiment(int iters, int size, int nsamples, int nrules, rule_t *rules)
 		}
 		END_TIME(tv_start, tv_end, tv_acc);
 		REPORT_TIME("analyze", "per add/del", tv_acc, ((size-1) * 2));
+		ruleset_free(rs);
 	}
 
 }

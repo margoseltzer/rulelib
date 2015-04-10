@@ -81,6 +81,7 @@ void ruleset_delete(rule_t *, int, ruleset_t *, int);
 int ruleset_swap(ruleset_t *, int, int, rule_t *);
 void ruleset_print(ruleset_t *, rule_t *);
 void ruleset_entry_print(ruleset_entry_t *, int);
+void ruleset_free(ruleset_t *);
 
 int rules_init(const char *, int *, int *, rule_t **);
 
