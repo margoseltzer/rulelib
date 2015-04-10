@@ -45,7 +45,7 @@ int byte_ones[] = {
 /* 192 */ 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
 /* 208 */ 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
 /* 224 */ 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
-/* 140 */ 4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8 };
+/* 240 */ 4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8 };
 
 #define BYTE_MASK	0xFF
 
@@ -59,13 +59,14 @@ int byte_ones[] = {
  * OUTPUTS: an array of rule_t's
  */
 int
-rules_init(const char *infile, int *nrules, int *nsamples, rule_t **rules_ret)
+rules_init(const char *infile, int *nrules,
+    int *nsamples, rule_t **rules_ret, int add_default_rule)
 {
 	FILE *fi;
-	char *line, *rulestr;
+	char *line, *p, *rulestr;
 	int rule_cnt, sample_cnt, rsize;
 	int i, ones, ret;
-	rule_t *rules;
+	rule_t *rules=NULL;
 	rule_t default_rule;
 	size_t len, rulelen;
 
@@ -73,16 +74,18 @@ rules_init(const char *infile, int *nrules, int *nsamples, rule_t **rules_ret)
 
 	if ((fi = fopen(infile, "r")) == NULL)
 		return (errno);
-
 	/*
 	 * Leave a space for the 0th (default) rule, which we'll add at
 	 * the end.
 	 */
-	rule_cnt = 1;
+	rule_cnt = add_default_rule ? 1 : 0;
 	while ((line = fgetln(fi, &len)) != NULL) {
 		if (rule_cnt >= rsize) {
 			rsize += RULE_INC;
-			rules = realloc(rules, rsize * sizeof(rule_t));
+			if (rules == NULL)
+                		rules = malloc(rsize * sizeof(rule_t));
+            		else
+                		rules = realloc(rules, rsize * sizeof(rule_t));
 			if (rules == NULL)
 				goto err;
 		}
@@ -104,16 +107,27 @@ rules_init(const char *infile, int *nrules, int *nsamples, rule_t **rules_ret)
 		    &rules[rule_cnt].truthtable) != 0)
 		    	goto err;
 		rules[rule_cnt].support = ones;
+
+		rules[rule_cnt].cardinality = 1;
+		for (p = index(rules[rule_cnt].features, '&');
+		    p != NULL; p = index(p, '&')) {
+            		rules[rule_cnt].cardinality++;
+			p++;
+		}
+
 		rule_cnt++;
 	}
 	/* All done! */
 	fclose(fi);
 
 	/* Now create the 0'th (default) rule. */
-	rules[0].support = sample_cnt;
-	rules[0].features = "default";
-	if (make_default(&rules[0].truthtable, sample_cnt) != 0)
-		goto err;
+	if (add_default_rule) {
+		rules[0].support = sample_cnt;
+		rules[0].features = "default";
+		rules[0].cardinality = 0;
+		if (make_default(&rules[0].truthtable, sample_cnt) != 0)
+			goto err;
+    }
 
 	*nsamples = sample_cnt;
 	*nrules = rule_cnt;
@@ -153,7 +167,7 @@ rule_vinit(int len, VECTOR *ret)
 }
 
 void
-rule_vdelete(mpz_t v)
+rule_vdelete(VECTOR v)
 {
 #ifdef GMP
 	mpz_clear(v);
@@ -270,13 +284,17 @@ make_default(VECTOR *tt, int len)
 	 * order bit will be 0
 	 */
 	mpz_init2(*tt, (len+1));
+
 	/*
-	 * This is ungodly slow, but the only way I could figure out how to do this
-	 * without converting this into a negative number.
+	 * This is ungodly slow, but the only way I could figure out how to
+	 * do this without converting this into a negative number.
 	 */
 	for (int i=0; i < len; i++)
 		mpz_setbit(*tt, i);
 	mpz_init_set(mpz_hack_default_mask, *tt);
+	mpz_t v;
+	mpz_init2(v, len);
+	mpz_com(*tt, v);
 	return (0);
 #else
 	int nbytes;
@@ -347,6 +365,7 @@ ruleset_init(int nrules,
 				    all_captured, cur_re->captures, nsamples, &tmp);
 		}
 	}
+
 	*retruleset = rs;
 	
 	rule_vdelete(all_captured);
@@ -377,9 +396,9 @@ ruleset_free(ruleset_t *rs)
 int
 ruleset_add(rule_t *rules, int nrules, ruleset_t *rs, int newrule, int ndx)
 {
-	int i, ret, tmp;
+	int i, ret, tmp, cnt, cnt2;
 	rule_t *expand;
-	VECTOR captured;
+	VECTOR captured, caught;
 
 	/* Check for space. */
 	if (rs->n_alloc < rs->n_rules + 1) {
@@ -388,13 +407,15 @@ ruleset_add(rule_t *rules, int nrules, ruleset_t *rs, int newrule, int ndx)
 		if (expand == NULL)
 			return (errno);			
 		rs->n_alloc = rs->n_rules + 1;
+        	rule_vinit(rs->n_samples, &rs->rules[rs->n_rules].captures);
 	}
-
+    
 	/* Shift later rules down by 1. */
 	if (ndx != rs->n_rules)
 		memmove(rs->rules + (ndx + 1), rs->rules + ndx,
-		    sizeof(ruleset_entry_t) * rs->n_rules - ndx);
-
+		    sizeof(ruleset_entry_t) * (rs->n_rules - ndx));
+    
+    
 	/*
 	 * Insert new rule.
 	 * 1. Compute what is already captured by earlier rules.
@@ -428,6 +449,22 @@ ruleset_add(rule_t *rules, int nrules, ruleset_t *rs, int newrule, int ndx)
 	return(0);
 }
 
+void
+ruleset_print_4test(ruleset_t *rs) {
+	printf("here-------------\n");
+	int tot_ncaptured=0;
+
+	for (int k=0; k<rs->n_rules; k++){
+		printf("rule_id = %6d \t ncaptures = %6d \t pt_addr = %p\n",
+		    rs->rules[k].rule_id, rs->rules[k].ncaptured,
+		    rs->rules[k].captures);
+		tot_ncaptured += rs->rules[k].ncaptured;
+	}
+	assert(tot_ncaptured == rs->n_samples);
+	printf("total ncaptured = %d \t total samples = %d\n", 
+	    tot_ncaptured, rs->n_samples);
+}
+
 /*
  * Delete the rule in the ndx-th position in the given ruleset.
  */
@@ -456,7 +493,8 @@ ruleset_delete(rule_t *rules, int nrules, ruleset_t *rs, int ndx)
 
 		/*
 		 * We just captured some of the bits that the old rule used to
-		 * capture; remove them from the ones we're still trying to capture.
+		 * capture; remove them from the ones we're still trying to
+		 * capture.
 		 */
 		rule_vandnot(rs->rules[ndx].captures, rs->rules[ndx].captures,
 		    tmp_vec, rs->n_samples, &rs->rules[ndx].ncaptured);
@@ -621,13 +659,13 @@ rule_vandnot(VECTOR dest,
 	count = 0;
 	assert(dest != NULL);
 	for (i = 0; i < nentries; i++) {
-		dest[i] = src1[i] & ~src2[i];
+		dest[i] = src1[i] & (~src2[i]);
 		count += count_ones(dest[i]);
 	}
 
 	*ret_cnt = count;
+    return;
 #endif
-	return;
 }
 
 int
@@ -665,7 +703,7 @@ ruleset_print(ruleset_t *rs, rule_t *rules)
 void
 ruleset_entry_print(ruleset_entry_t *re, int n)
 {
-	printf("%d captured: ", re->ncaptured);
+	printf("%d captured; \n", re->ncaptured);
 	rule_vector_print(re->captures, n);
 }
 
@@ -675,7 +713,8 @@ rule_print(rule_t *rules, int ndx, int n)
 	rule_t *r;
 
 	r = rules + ndx;
-	printf("RULE %d: %s %d: ", ndx, r->features, r->support);
+	printf("RULE %d: ( %s ) %d %d: ", ndx, r->features,
+	    r->support, r->cardinality);
 	rule_vector_print(r->truthtable, n);
 }
 
@@ -689,7 +728,7 @@ rule_vector_print(VECTOR v, int n)
 	int i;
 
 	for (i = 0; i < n; i++)
-		printf("0x%lx ", v[i]);
+		printf("oct%lo ", v[i]);
 	printf("\n");
 #endif
 

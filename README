@@ -38,3 +38,11 @@ Compile options:
 This package compiles both with and without the GMP library.  Without it,
 bit vector operations are coded manually as arrays of long longs. With -D GMP,
 we store the vectors as bignums.
+
+Sample code for running the code currently in the rulelib directory, 
+first do:
+	python makedata.py titanic_train
+	python makedata.py adult2_train
+then:
+	./analyze -s 30 -i 100 titanic_train.out titanic_train.label
+	./analyze -s 30 -i 100 adult2_train.out adult2_train.label

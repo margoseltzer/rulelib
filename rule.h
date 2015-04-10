@@ -5,7 +5,6 @@
 
 #ifdef GMP
 #include <gmp.h>
-const int mp_bits_per_limb;
 #endif
 
 /*
@@ -55,6 +54,7 @@ typedef v_entry *VECTOR;
  */
 typedef struct rule {
 	char *features;			/* Representation of the rule. */
+	int cardinality;		/* Number of items in rule. */
 	int support;			/* Number of 1's in truth table. */
 	VECTOR truthtable;		/* Truth table; one bit per sample. */
 } rule_t;
@@ -79,11 +79,14 @@ int ruleset_init(int, int, int *, rule_t *, ruleset_t **);
 int ruleset_add(rule_t *, int, ruleset_t *, int, int);
 void ruleset_delete(rule_t *, int, ruleset_t *, int);
 int ruleset_swap(ruleset_t *, int, int, rule_t *);
+int ruleset_swap_any(ruleset_t *, int, int, rule_t *);
+
 void ruleset_print(ruleset_t *, rule_t *);
 void ruleset_entry_print(ruleset_entry_t *, int);
 void ruleset_free(ruleset_t *);
+void ruleset_print_4test(ruleset_t *);
 
-int rules_init(const char *, int *, int *, rule_t **);
+int rules_init(const char *, int *, int *, rule_t **, int);
 
 void rule_print(rule_t *, int, int);
 void rule_print_all(rule_t *, int, int);
@@ -91,7 +94,7 @@ void rule_vector_print(VECTOR, int);
 void rule_copy(VECTOR, VECTOR, int);
 
 int rule_vinit(int, VECTOR *);
-void rule_vdelete(mpz_t);
+void rule_vdelete(VECTOR);
 void rule_vand(VECTOR, VECTOR, VECTOR, int, int *);
 void rule_vandnot(VECTOR, VECTOR, VECTOR, int, int *);
 void rule_vor(VECTOR, VECTOR, VECTOR, int, int *);
