@@ -380,6 +380,60 @@ err1:
 	return (ENOMEM);
 }
 
+int
+ruleset_copy(ruleset_t **ret_dest, ruleset_t *src)
+{
+	int i;
+	ruleset_t *dest;
+
+	if ((dest = malloc(sizeof(ruleset_t) +
+	    ((src->n_rules + 1) * sizeof(ruleset_entry_t)))) == NULL)
+	    	return (errno);
+	dest->n_alloc = src->n_rules + 1;
+	dest->n_rules = src->n_rules;
+	dest->n_samples = src->n_samples;
+    
+	for (i = 0; i < src->n_rules; i++) {
+		dest->rules[i].rule_id = src->rules[i].rule_id;
+		dest->rules[i].ncaptured = src->rules[i].ncaptured;
+		rule_vinit(src->n_samples, &(dest->rules[i].captures));
+		rule_copy(dest->rules[i].captures,
+		    src->rules[i].captures, src->n_samples);
+	}
+	/* Initialize the extra assigned space. */
+	if (rule_vinit(src->n_samples,
+	    &(dest->rules[src->n_rules].captures)) != 0)
+		return (errno);
+	*ret_dest = dest;
+
+	return (0);
+}
+
+/*
+ * Save the idarray for this ruleset incase we need to restore it.
+ * We don't know how long the idarray is currently, so if it's
+ * allocated, we free it and reallocate one we know to be large enough.
+ */
+int
+ruleset_backup(ruleset_t *rs, int **rs_idarray)
+{
+	int *ids, i, j;
+	
+	if ((ids = *rs_idarray) != NULL)
+		free(ids);
+
+
+	if ((ids = malloc(rs->n_rules * sizeof(int))) == NULL)
+		return (errno);
+
+	for (i = 0; i < rs->n_rules; i++)
+		ids[i] = rs->rules[i].rule_id;
+
+	*rs_idarray = ids;
+
+	return (0);
+}
+
 void
 ruleset_free(ruleset_t *rs)
 {
@@ -588,6 +642,55 @@ ruleset_swap(ruleset_t *rs, int i, int j, rule_t *rules)
 
 	return (0);
 }
+
+int
+ruleset_swap_any(ruleset_t *rs, int i, int j, rule_t *rules)
+{
+	int cnt, k, ndx, nset, ret, temp;
+	VECTOR caught;
+    
+	assert(i <= rs->n_rules);
+	assert(j <= rs->n_rules);
+
+	/* Normalize so i < j */
+	if (i > j) {
+		temp = i;
+		i = j;
+		j = temp;
+	}
+	assert(i <= j);
+
+	/*
+	 * Compute newly caught in two steps: first compute everything
+	 * caught in rules i to j, then compute everything from scratch
+	 * for rules between rule i and rule j, both inclusive.
+	 */
+	if ((ret = rule_vinit(rs->n_samples, &caught)) != 0)
+		return (ret);
+
+	for (k = i; k <= j; k++)
+		rule_vor(caught, caught, rs->rules[k].captures, rs->n_samples, &cnt);
+    
+	/* Swap the two rule_ids in the ruleset. */
+	 
+	temp = rs->rules[i].rule_id;
+	rs->rules[i].rule_id = rs->rules[j].rule_id;
+	rs->rules[j].rule_id = temp;
+    
+    	/* Now recompute captures for all rules, R, i <= R <= j. */
+	for (k = i; k <= j; k++) {
+		rule_vand(rs->rules[k].captures, caught,
+		    rules[rs->rules[k].rule_id].truthtable,
+		    rs->n_samples, &rs->rules[k].ncaptured);
+		/* Remove whatever we caught with rule K from "caught". */
+		rule_vandnot(caught,
+		    caught, rs->rules[k].captures, rs->n_samples, &cnt);
+	}
+    
+    	rule_vdelete(caught);
+	return (0);
+}
+
 
 /* Dest must have been created. */
 void

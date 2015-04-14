@@ -31,20 +31,18 @@ gsl_rng *RAND_GSL;
 #define MAX_RULE_CARDINALITY 10
 #define NLABELS 2
 
+#define gen_poisson(MU) (int)gsl_ran_poisson(RAND_GSL, MU)
+#define gen_poission_pdf(K, MU) gsl_ran_poisson_pdf(K, MU)
+#define gen_gamma_pdf(X, A, B) gsl_ran_gamma_pdf(X, A, B)
+
 #define LAMBDA 3.0
 #define ETA 1.0
 double ALPHA[2] = {1, 1};
-
 double compute_log_posterior(ruleset_t *, rule_t *, int, rule_t *);
-void init_gsl_rand_gen();
-int gen_poission(double);
-void gsl_ran_poisson_test();
 
 void run_experiment(int, int, int, int, rule_t *);
 void run_mcmc(int, int, int, int, rule_t *, rule_t *);
 void ruleset_proposal(ruleset_t *, int, int *, int *, char *, double *);
-void ruleset_assign(ruleset_t **, ruleset_t *);
-void ruleset_backup(ruleset_t *, int **, double, double *);
 
 int debug;
 
@@ -66,7 +64,7 @@ main (int argc, char *argv[])
 	extern char *optarg;
 	extern int optind, optopt, opterr, optreset;
 	int ret, size = DEFAULT_RULESET_SIZE;
-	int iters, nrules, nsamples, nlabels, nsamples_dup, tnum;
+	int iters, nrules, nsamples, nlabels, nsamples_chk, tnum;
 	char ch, *cmdfile = NULL, *infile;
 	rule_t *rules, *labels;
 	struct timeval tv_acc, tv_start, tv_end;
@@ -102,7 +100,7 @@ main (int argc, char *argv[])
 	argc -= optind;
 	argv += optind;
 
-	if (argc == 0)
+	if (argc != 2)
 		return (usage());
 
 	/* read in the data-rule relations */
@@ -121,10 +119,15 @@ main (int argc, char *argv[])
 	if (debug)
 		rule_print_all(rules, nrules, nsamples);
 
+	/*
+	 * We treat the label file as a separate ruleset, since it has
+	 * a similar format.
+	 */
 	infile = argv[1];
-
-	if ((ret = rules_init(infile, &nlabels, &nsamples_dup, &labels, 0)) != 0)
-        return (ret);
+	if ((ret = rules_init(infile, &nlabels, &nsamples_chk, &labels, 0)) != 0)
+		return (ret);
+    	assert(nlabels == 2);
+	assert(nsamples_chk == nsamples);
     
 	rule_print_all(labels, nlabels, nsamples);
 	printf("\n%d labels %d samples\n\n", nlabels, nsamples);
@@ -244,115 +247,131 @@ run_experiment(int iters, int size, int nsamples, int nrules, rule_t *rules)
 }
 
 void
-run_mcmc(int iters, int init_size, int nsamples, int nrules, rule_t *rules, rule_t *labels) {
-    int i,j,t, ndx1, ndx2;
-    char stepchar;
-    ruleset_t *rs, *rs_proposal=NULL, *rs_temp=NULL;
-    double jump_prob, log_post_rs=0.0, log_post_rs_proposal=0.0;
-    int *rs_idarray, len;
-    double max_log_posterior = 1e-9;
-    /* initialize random number generator for some distrubitions */
-    init_gsl_rand_gen();
-    //gsl_ran_poisson_test();
+init_gsl_rand_gen() {
+	gsl_rng_env_setup();
+	RAND_GSL = gsl_rng_alloc(gsl_rng_default);
+}
+
+void
+run_mcmc(int iters,
+    int init_size, int nsamples, int nrules, rule_t *rules, rule_t *labels) {
+	char stepchar;
+	double jump_prob, log_post_rs=0.0, log_post_rs_proposal=0.0;
+	double max_log_posterior = 1e-9;
+	int i,j,t, ndx1, ndx2;
+	int len, ret, *rs_idarray;
+	ruleset_t *rs, *rs_proposal, *rs_temp;
+
+	rs_idarray = NULL;
+	rs_proposal = NULL;
+	rs_temp = NULL;
+
+	/* initialize random number generator for some distrubitions */
+	init_gsl_rand_gen();
     
-//    for (int i=0; i<20; i++)
-//        printf("%u , ", gen_poisson(7.2));
-//    printf("\n");
+	/* Create a random rule set and set up initial parameters. */
+	if ((ret =
+	    create_random_ruleset(init_size, nsamples, nrules, rules, &rs)) != 0)
+		return;
+
+	log_post_rs = compute_log_posterior(rs, rules, nrules, labels);
+	if (ruleset_backup(rs, &rs_idarray) != 0)
+		return;
+	max_log_posterior = log_post_rs;
+
+	len = rs->n_rules;
+
+	/* MIS I guessed this was for testing/debugging and put it under debug. */
+	if (debug) {
+		for (int i = 0; i < 10; i++) {
+			ruleset_proposal(rs,
+			    nrules, &ndx1, &ndx2, &stepchar, &jump_prob);
+			printf("\n%d, %d, %d, %c, %f\n",
+			    nrules, ndx1, ndx2, stepchar, log(jump_prob));
+		}
+    	}
     
-    //initialize_ruleset(&rs, rules, nrules)
     
-    /* initialize the ruleset */
-    create_random_ruleset(init_size, nsamples, nrules, rules, &rs);
-    log_post_rs = compute_log_posterior(rs, rules, nrules, labels);
-    ruleset_backup(rs, &rs_idarray, log_post_rs, &max_log_posterior);
-    len = rs->n_rules;
-//
-//    for (int i=0; i<10; i++) {
-//        ruleset_proposal(rs, nrules, &ndx1, &ndx2, &stepchar, &jump_prob);
-//        printf("\n%d, %d, %d, %c, %f\n", nrules, ndx1, ndx2, stepchar, log(jump_prob));
-//    }
-    
-    
-    ruleset_assign(&rs_proposal, rs); // rs_proposel <-- rs
-    ruleset_print_4test(rs);
-//    printf("\n*****************************************\n");
-//    printf("\n %p %p %d\n", rs, rs_proposal, rs_proposal==NULL);
-    
-//    ruleset_assign(&rs_proposal, rs);  // rs_proposel <-- rs
-//    ruleset_print(rs_proposal, rules);
-//    printf("\n %p %p \n", rs, rs_proposal);
-    printf("iters = %d", iters);
-    for (int i=0; i<iters; i++) {
-        
-//        ruleset_print_4test(rs);
+	if (ruleset_copy(&rs_proposal, rs) != 0)
+		return;
+
+	if (debug) {
+		ruleset_print_4test(rs);
+
+		printf("\n*****************************************\n");
+		printf("\n %p %p %d\n", rs, rs_proposal, rs_proposal==NULL);
+   	} 
+
+	if (ruleset_copy(&rs_proposal, rs) != 0)
+		return;
+
+	if (debug) {
+		ruleset_print(rs_proposal, rules);
+		printf("\n %p %p \n", rs, rs_proposal);
+		printf("iters = %d", iters);
+		for (int i=0; i<iters; i++) {
+			ruleset_print_4test(rs);
+		}
+	}
         
         ruleset_proposal(rs, nrules, &ndx1, &ndx2, &stepchar, &jump_prob);
-        printf("\nnrules=%d, ndx1=%d, ndx2=%d, action=%c, relativeProbability=%f\n", nrules, ndx1, ndx2, stepchar, log(jump_prob));
-        printf("%d rules currently in the ruleset, they are:\n", rs->n_rules);
-        for (int j=0; j<rs->n_rules; j++) printf("%u ", rs->rules[j].rule_id); printf("\n");
+	if (debug) {
+		printf("\nnrules=%d, ndx1=%d, ndx2=%d, action=%c, %s=%f\n",
+		    nrules, ndx1, ndx2, stepchar, "relativeProbability",
+		    log(jump_prob));
+		printf("%d rules currently in the ruleset, they are:\n", rs->n_rules);
+
+        	for (int j=0; j<rs->n_rules; j++)
+			printf("%u ", rs->rules[j].rule_id); printf("\n");
+	}
         
-        ruleset_assign(&rs_proposal, rs); // rs_proposel <-- rs
+        ruleset_copy(&rs_proposal, rs);
         
         switch (stepchar) {
             case 'A':
-                ruleset_add(rules, nrules, rs_proposal, ndx1, ndx2); //add ndx1 rule to ndx2
+                ruleset_add(rules, nrules, rs_proposal, ndx1, ndx2);
                 break;
             case 'D':
                 ruleset_delete(rules, nrules, rs_proposal, ndx1);
                 break;
             case 'S':
-//                if (ndx1 > ndx2) { temp = ndx1; ndx1 = ndx2; ndx2 = temp;}
-                printf("%d <-----> %d\n", ndx1, ndx2);
-//                for (int j=ndx1; j<ndx2; j++)
-//                    ruleset_swap(rs_proposal, j, j+1, rules);
-//                for (int j=ndx2-1; j>ndx1; j--)
-//                    ruleset_swap(rs_proposal, j-1, j, rules);
                 ruleset_swap_any(rs_proposal, ndx1, ndx2, rules);
                 break;
             default:
                 break;
         }
-////        if (stepchar!='S')
-//        int cnt=0;
-//        for (int j=0; j<rs_proposal->n_rules; j++) {
-//            printf("%d\n", rs_proposal->rules[j].ncaptured);
-//            cnt += rs_proposal->rules[j].ncaptured;
-//        }
-//            printf("############Been here! %d\n", cnt);
-//        for (int j=0; j<rs_proposal->n_rules; j++) printf("%u ", rs_proposal->rules[j].rule_id);
-//        printf("\n");
-        ruleset_print_4test(rs_proposal);
+
+	if (debug)
+		ruleset_print_4test(rs_proposal);
         
-        log_post_rs_proposal = compute_log_posterior(rs_proposal, rules, nrules, labels);
-//        printf("%f\n", jump_prob);
-        if (log((random() / (float)RAND_MAX)) < log_post_rs_proposal-log_post_rs+log(jump_prob)) {
-            free(rs);
-            rs = rs_proposal;
-            log_post_rs = log_post_rs_proposal;
-            rs_proposal = NULL;
-            ruleset_backup(rs, &rs_idarray, log_post_rs, &max_log_posterior);
-            len = rs->n_rules;
-            printf("yes!\n");
-        }
-    }
-    /* regenerate the best rule list */
-    printf("\n\n/*----The best rule list is: */\n");
-    ruleset_init(len, nsamples, rs_idarray, rules, &rs);
-    for (int i=0; i < len; i++) printf("rule[%d]_id = %d\n", i, rs_idarray[i]);
-    printf("nmax_log_posterior = %6f\n\n", max_log_posterior);
-    ruleset_print(rs, rules);
+        log_post_rs_proposal =
+	    compute_log_posterior(rs_proposal, rules, nrules, labels);
+
+	if (log((random() / (float)RAND_MAX)) <
+	    log_post_rs_proposal-log_post_rs+log(jump_prob)) {
+		free(rs);
+		rs = rs_proposal;
+		log_post_rs = log_post_rs_proposal;
+		rs_proposal = NULL;
+
+		if (ruleset_backup(rs, &rs_idarray) != 0)
+			return;
+		max_log_posterior = log_post_rs;
+
+		len = rs->n_rules;
+	}
+    
+	/* regenerate the best rule list */
+	ruleset_init(len, nsamples, rs_idarray, rules, &rs);
+
+	if (debug) {
+		for (int i=0; i < len; i++)
+			printf("rule[%d]_id = %d\n", i, rs_idarray[i]);
+		printf("nmax_log_posterior = %6f\n\n", max_log_posterior);
+		ruleset_print(rs, rules);
+	}
 }
 
-void
-ruleset_backup(ruleset_t *rs, int **rs_idarray, double log_post_rs, double *max_log_posterior) {
-    int *ids = *rs_idarray;
-    if (ids!=NULL) free(ids);
-    ids = malloc(rs->n_rules*sizeof(int));
-    for (int i=0; i < rs->n_rules; i++)
-        ids[i] = rs->rules[i].rule_id;
-    *rs_idarray = ids;
-    *max_log_posterior = log_post_rs;
-}
 
 double compute_log_posterior(ruleset_t *rs, rule_t *rules, int nrules, rule_t *labels) {
     double log_prior = 0.0, log_likelihood = 0.0;
@@ -400,47 +419,6 @@ double compute_log_posterior(ruleset_t *rs, rule_t *rules, int nrules, rule_t *l
     }
     printf("log_prior = %6f \t log_likelihood = %6f \n", log_prior, log_likelihood);
     return log_prior + log_likelihood;
-}
-
-int
-ruleset_swap_any(ruleset_t *rs, int i, int j, rule_t *rules)
-{
-    int temp, cnt, ndx, nset, ret;
-    VECTOR caught;
-    
-    assert(i <= rs->n_rules);
-    assert(j <= rs->n_rules);
-    if (i>j) { temp=i; i=j; j=temp; }
-    assert(i <= j);
-    /*
-     * Compute newly caught in two steps: first compute everything
-     * caught in rules i to j, then compute everything from scratch
-     * for rules between rule i and rule j, both inclusive.
-     */
-    if ((ret = rule_vinit(rs->n_samples, &caught)) != 0)
-        return (ret);
-    for (int k=i; k<=j; k++)
-        rule_vor(caught, caught, rs->rules[k].captures, rs->n_samples, &cnt);
-    
-    printf("cnt = %d\n", cnt);
-    temp = rs->rules[i].rule_id;
-    rs->rules[i].rule_id = rs->rules[j].rule_id;
-    rs->rules[j].rule_id = temp;
-    
-    for (int k=i; k<=j; k++) {
-        rule_vand(rs->rules[k].captures, caught, rules[rs->rules[k].rule_id].truthtable, rs->n_samples, &rs->rules[k].ncaptured);
-        rule_vandnot(caught, caught, rs->rules[k].captures, rs->n_samples, &cnt);
-        printf("cnt = %d, captured by this rule = %d\n", cnt, rs->rules[k].ncaptured);
-    }
-    printf("cnt = %d\n", cnt);
-    assert(cnt == 0);
-    
-#ifdef GMP
-    mpz_clear(caught);
-#else
-    free(caught);
-#endif
-    return (0);
 }
 
 
@@ -516,75 +494,28 @@ ruleset_proposal(ruleset_t *rs, int nrules_mined, int *ndx1, int *ndx2, char *st
 }
 
 void
-ruleset_assign(ruleset_t **ret_dest, ruleset_t *src) {
-    ruleset_t *dest = *ret_dest;
-    if (dest != NULL){
-//        printf("wrong here\n");
-//        realloc(dest, sizeof(ruleset_t) + (src->n_rules+1) * sizeof(ruleset_entry_t));
-        free(dest);
-    }
-    dest = malloc(sizeof(ruleset_t) + (src->n_rules+1) * sizeof(ruleset_entry_t));
-    dest->n_alloc = src->n_rules + 1;
-    dest->n_rules = src->n_rules;
-    dest->n_samples = src->n_samples;
-    
-//    printf("\n%d, %p\n", dest==NULL, dest);
-   
-    for (int i=0; i<src->n_rules; i++){
-        dest->rules[i].rule_id = src->rules[i].rule_id;
-        dest->rules[i].ncaptured = src->rules[i].ncaptured;
-        rule_vinit(src->n_samples, &(dest->rules[i].captures));
-//          this line is wrong below
-//        VECTOR_ASSIGN(dest->rules[i].captures, src->rules[i].captures);
-        rule_copy(dest->rules[i].captures, src->rules[i].captures, src->n_samples);
-    }
-    /* initialize the extra assigned space */
-    rule_vinit(src->n_samples, &(dest->rules[src->n_rules].captures));
-    *ret_dest = dest;
-}
-
-
-void
-init_gsl_rand_gen() {
-    gsl_rng_env_setup();
-    RAND_GSL = gsl_rng_alloc(gsl_rng_default);
-}
-
-int
-gen_poisson(double mu) {
-    return (int) gsl_ran_poisson(RAND_GSL, mu);
-}
-
-double
-gen_poission_pdf(int k, double mu) {
-    return gsl_ran_poisson_pdf(k, mu);
-}
-
-double
-gen_gamma_pdf(double x, double a, double b) {
-    return gsl_ran_gamma_pdf(x, a, b);
-}
-
-void
 gsl_ran_poisson_test() {
-    unsigned int k1 = gsl_ran_poisson(RAND_GSL, 5);
-    unsigned int k2 = gsl_ran_poisson(RAND_GSL, 5);
-    printf("k1 = %u , k2 = %u\n", k1, k2);
+	int i, j, p[10] = {};
+	unsigned int number;
+	unsigned int k1 = gsl_ran_poisson(RAND_GSL, 5);
+	unsigned int k2 = gsl_ran_poisson(RAND_GSL, 5);
+
+	printf("k1 = %u , k2 = %u\n", k1, k2);
     
-    const int nrolls = 10000; // number of experiments
-    const int nstars = 100;   // maximum number of stars to distribute
+	const int nrolls = 10000; // number of experiments
+	const int nstars = 100;   // maximum number of stars to distribute
     
-    int p[10]={};
-    for (int i=0; i<nrolls; ++i) {
-        unsigned int number = gsl_ran_poisson(RAND_GSL, 4.1);
-        if (number<10) ++p[number];
-    }
+	for (i = 0; i < nrolls; ++i) {
+		number = gsl_ran_poisson(RAND_GSL, 4.1);
+		if ( number < 10)
+			++p[number];
+	}
     
-    printf("poisson_distribution (mean=4.1):\n" );
-    for (int i=0; i<10; ++i) {
-        printf("%d, : ", i);
-        for (int j=0; j< p[i]*nstars/nrolls; j++)
-            printf("*");
-        printf("\n");
-    }
+	printf("poisson_distribution (mean=4.1):\n" );
+	for (i = 0; i < 10; ++i) {
+		printf("%d, : ", i);
+		for (j = 0; j < p[i]*nstars/nrolls; j++)
+			printf("*");
+		printf("\n");
+	}
 }
