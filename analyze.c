@@ -372,125 +372,140 @@ run_mcmc(int iters,
 	}
 }
 
+/* Utilities for MCMC. */
+double
+compute_log_posterior(ruleset_t *rs, rule_t *rules, int nrules, rule_t *labels) {
+	double log_prior = 0.0, log_likelihood = 0.0;
+	static double eta_norm = 0;
+	static double *log_lambda_pmf=NULL, *log_eta_pmf=NULL;
+	int i,j,k,li;
+	int card_count[1 + MAX_RULE_CARDINALITY];
+	int maxcard = 0;
+	int n0, n1;
+	VECTOR v0;
 
-double compute_log_posterior(ruleset_t *rs, rule_t *rules, int nrules, rule_t *labels) {
-    double log_prior = 0.0, log_likelihood = 0.0;
-    static double eta_norm = 0;
-    static double *log_lambda_pmf=NULL, *log_eta_pmf=NULL;
-    int i,j,k,li;
-    /* prior pre-calculation */
-    if (log_lambda_pmf == NULL) {
-        log_lambda_pmf = malloc(nrules*sizeof(double));
-        log_eta_pmf = malloc((1+MAX_RULE_CARDINALITY)*sizeof(double));
-        for (int i=0; i < nrules; i++)
-            log_lambda_pmf[i] = log(gsl_ran_poisson_pdf(i, LAMBDA));
-        for (int i=0; i <= MAX_RULE_CARDINALITY; i++)
-            log_eta_pmf[i] = log(gsl_ran_poisson_pdf(i, ETA));
-    }
-    /* calculate log_prior */
-    int card_count[1 + MAX_RULE_CARDINALITY];
-    for (i=0; i <= MAX_RULE_CARDINALITY; i++) card_count[i] = 0;
-    int maxcard = 0;
-    for (i=0; i < rs->n_rules; i++){
-        card_count[rules[rs->rules[i].rule_id].cardinality]++;
-        if (rules[rs->rules[i].rule_id].cardinality > maxcard)
-            maxcard = rules[rs->rules[i].rule_id].cardinality;
-    }
+	/* prior pre-calculation */
+	if (log_lambda_pmf == NULL) {
+		log_lambda_pmf = malloc(nrules*sizeof(double));
+		log_eta_pmf = malloc((1+MAX_RULE_CARDINALITY)*sizeof(double));
+		for (i = 0; i < nrules; i++)
+			log_lambda_pmf[i] = log(gsl_ran_poisson_pdf(i, LAMBDA));
+		for (i = 0; i <= MAX_RULE_CARDINALITY; i++)
+			log_eta_pmf[i] = log(gsl_ran_poisson_pdf(i, ETA));
+	}
+
+	/* Calculate log_prior. */
+	for (i = 0; i <= MAX_RULE_CARDINALITY; i++)
+		card_count[i] = 0;
+
+	for (i=0; i < rs->n_rules; i++) {
+		card_count[rules[rs->rules[i].rule_id].cardinality]++;
+		if (rules[rs->rules[i].rule_id].cardinality > maxcard)
+			maxcard = rules[rs->rules[i].rule_id].cardinality;
+	}
     
-    log_prior += log_lambda_pmf[rs->n_rules-1];
-    eta_norm = gsl_cdf_poisson_P(maxcard, ETA) - gsl_ran_poisson_pdf(0, ETA);
-    for (i=0; i < rs->n_rules-1; i++){ //don't compute the last rule(default rule).
-        li = rules[rs->rules[i].rule_id].cardinality;
-        log_prior += log_eta_pmf[li] - log(eta_norm);
-        log_prior += -log(card_count[li]);
-        card_count[li]--;
-        if (card_count[li] == 0)
-            eta_norm -= exp(log_eta_pmf[li]);
-    }
-    /* calculate log_likelihood */
-    VECTOR v0;
-    rule_vinit(rs->n_samples, &v0);
-    for (int j=0; j < rs->n_rules; j++) {
-        int n0, n1;
-        rule_vand(v0, rs->rules[j].captures, labels[0].truthtable, rs->n_samples, &n0);
-//        rule_vand(v0, v0, labels[0].truthtable, rs->n_samples, &n0);
-        n1 = rs->rules[j].ncaptured - n0;
-        log_likelihood += gsl_sf_lngamma(n0+1) + gsl_sf_lngamma(n1+1) - gsl_sf_lngamma(n0+n1+2);
-    }
-    printf("log_prior = %6f \t log_likelihood = %6f \n", log_prior, log_likelihood);
-    return log_prior + log_likelihood;
+	log_prior += log_lambda_pmf[rs->n_rules-1];
+	eta_norm = gsl_cdf_poisson_P(maxcard, ETA) - gsl_ran_poisson_pdf(0, ETA);
+	for (i=0; i < rs->n_rules-1; i++){ //don't compute the last rule(default rule).
+		li = rules[rs->rules[i].rule_id].cardinality;
+		log_prior += log_eta_pmf[li] - log(eta_norm);
+		log_prior += -log(card_count[li]);
+		card_count[li]--;
+		if (card_count[li] == 0)
+			eta_norm -= exp(log_eta_pmf[li]);
+	}
+
+	/* calculate log_likelihood */
+	rule_vinit(rs->n_samples, &v0);
+	for (int j=0; j < rs->n_rules; j++) {
+		rule_vand(v0, rs->rules[j].captures,
+		    labels[0].truthtable, rs->n_samples, &n0);
+		n1 = rs->rules[j].ncaptured - n0;
+		log_likelihood += gsl_sf_lngamma(n0+1) + gsl_sf_lngamma(n1+1) - gsl_sf_lngamma(n0+n1+2);
+	}
+	return (log_prior + log_likelihood);
 }
 
 
 void
-ruleset_proposal(ruleset_t *rs, int nrules_mined, int *ndx1, int *ndx2, char *stepchar, double *jumpRatio) {
-    static double MOVEPROBS[15] = {
-        0.0, 1.0, 0.0,
-        0.0, 0.5, 0.5,
-        0.5, 0.0, 0.5,
-        1.0/3.0, 1.0/3.0, 1.0/3.0,
-        1.0/3.0, 1.0/3.0, 1.0/3.0
-    };
-    static double JUMPRATIOS[15] = {
-        0.0, 1/2, 0.0,
-        0.0, 2.0/3.0, 2.0,
-        1.0, 0.0, 2.0/3.0,
-        1.0, 1.5, 1.0,
-        1.0, 1.0, 1.0
-    };
-    double moveProbs[3], jumpRatios[3];
-//    double moveProbDefault[3] = {1.0/3.0, 1.0/3.0, 1.0/3.0};
-    int offset = 0;
-    if (rs->n_rules == 0){
-        offset = 0;
-    } else if (rs->n_rules == 1){
-        offset = 3;
-    } else if (rs->n_rules == nrules_mined-1){
-        offset = 6;
-    } else if (rs->n_rules == nrules_mined-2){
-        offset = 9;
-    } else {
-        offset = 12;
-    }
-    memcpy(moveProbs, MOVEPROBS+offset, 3*sizeof(double));
-    memcpy(jumpRatios, JUMPRATIOS+offset, 3*sizeof(double));
+ruleset_proposal(ruleset_t *rs,
+    int nrules_mined, int *ndx1, int *ndx2, char *stepchar, double *jumpRatio) {
+
+	static double MOVEPROBS[15] = {
+		0.0, 1.0, 0.0,
+		0.0, 0.5, 0.5,
+		0.5, 0.0, 0.5,
+		1.0/3.0, 1.0/3.0, 1.0/3.0,
+		1.0/3.0, 1.0/3.0, 1.0/3.0
+	};
+	static double JUMPRATIOS[15] = {
+		0.0, 1/2, 0.0,
+		0.0, 2.0/3.0, 2.0,
+		1.0, 0.0, 2.0/3.0,
+		1.0, 1.5, 1.0,
+		1.0, 1.0, 1.0
+	};
+
+	double moveProbs[3], jumpRatios[3];
+	double u;
+	int *allrules, cnt, i, index1, index2, offset;
+
+
+	if (rs->n_rules == 0){
+		offset = 0;
+	} else if (rs->n_rules == 1){
+		offset = 3;
+	} else if (rs->n_rules == nrules_mined-1){
+		offset = 6;
+	} else if (rs->n_rules == nrules_mined-2){
+		offset = 9;
+	} else {
+		offset = 12;
+	}
+
+	memcpy(moveProbs, MOVEPROBS+offset, 3*sizeof(double));
+	memcpy(jumpRatios, JUMPRATIOS+offset, 3*sizeof(double));
     
-    double u = ((double) rand()) / (RAND_MAX);
-    int index1, index2;
-    if (u < moveProbs[0]){
-        /* swap rules */
-        index1 = rand() % (rs->n_rules-1); // can't swap with the default rule
-        do {
-            index2 = rand() % (rs->n_rules-1);
-        }
-        while (index2==index1);
-        *jumpRatio = jumpRatios[0];
-        *stepchar = 'S';
-    } else if (u < moveProbs[0]+moveProbs[1]) {
-        /* add a new rule */
-        index1 = rs->n_rules + 1 + rand() % (nrules_mined-rs->n_rules);
-        int *allrules = calloc(nrules_mined, sizeof(int));
-        for (int i=0; i < rs->n_rules; i++) allrules[rs->rules[i].rule_id] = -1;
-        int cnt=0;
-        for (int i=0; i < nrules_mined; i++)
-            if (allrules[i] != -1)
-                allrules[cnt++] = i;
-        index1 = allrules[rand() % cnt];
-        free(allrules);
-        index2 = rand() % rs->n_rules; // can add a rule at the default rule position
-        *jumpRatio = jumpRatios[1] * (nrules_mined - 1 - rs->n_rules);
-        *stepchar = 'A';
-    } else if (u < moveProbs[0]+moveProbs[1]+moveProbs[2]){
-        /* delete an existing rule */
-        index1 = rand() % (rs->n_rules-1); //cannot delete the default rule
-        index2 = 0;// index2 doesn't matter in this case
-        *jumpRatio = jumpRatios[2] * (nrules_mined - rs->n_rules);
-        *stepchar = 'D';
-    } else{
-        //should raise exception here.
-    }
-    *ndx1 = index1;
-    *ndx2 = index2;
+	u = ((double) rand()) / (RAND_MAX);
+	if (u < moveProbs[0]) {
+		/* Swap rules -- but never the default (last) one. */
+        	index1 = rand() % (rs->n_rules-1);
+		do {
+		    index2 = rand() % (rs->n_rules-1);
+		} while (index2 == index1);
+
+		*jumpRatio = jumpRatios[0];
+		*stepchar = 'S';
+	} else if (u < moveProbs[0] + moveProbs[1]) {
+		/* Add a new rule. */
+		index1 = rs->n_rules + 1 + rand() % (nrules_mined-rs->n_rules);
+		allrules = calloc(nrules_mined, sizeof(int));
+
+		for (i = 0; i < rs->n_rules; i++)
+			allrules[rs->rules[i].rule_id] = -1;
+
+		for (cnt = 0, i = 0; i < nrules_mined; i++)
+			if (allrules[i] != -1)
+				allrules[cnt++] = i;
+
+		index1 = allrules[rand() % cnt];
+		free(allrules);
+		/* We do allow addition of a rule at default position. */
+		index2 = rand() % rs->n_rules;
+		*jumpRatio = jumpRatios[1] * (nrules_mined - 1 - rs->n_rules);
+		*stepchar = 'A';
+	} else if (u < moveProbs[0] + moveProbs[1] + moveProbs[2]) {
+		/* Delete an existing rule; not the default one. */
+		index1 = rand() % (rs->n_rules - 1);
+		index2 = 0;
+		*jumpRatio = jumpRatios[2] * (nrules_mined - rs->n_rules);
+		*stepchar = 'D';
+	} else{
+		return;
+	}
+
+	*ndx1 = index1;
+	*ndx2 = index2;
 }
 
 void
