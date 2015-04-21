@@ -364,12 +364,10 @@ run_mcmc(int iters,
 	/* regenerate the best rule list */
 	ruleset_init(len, nsamples, rs_idarray, rules, &rs);
 
-	if (debug) {
-		for (int i=0; i < len; i++)
-			printf("rule[%d]_id = %d\n", i, rs_idarray[i]);
-		printf("nmax_log_posterior = %6f\n\n", max_log_posterior);
-		ruleset_print(rs, rules);
-	}
+	for (int i=0; i < len; i++)
+		printf("rule[%d]_id = %d\n", i, rs_idarray[i]);
+	printf("nmax_log_posterior = %6f\n\n", max_log_posterior);
+	ruleset_print(rs, rules);
 }
 
 /* Utilities for MCMC. */
